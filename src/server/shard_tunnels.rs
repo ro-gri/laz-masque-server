@@ -497,7 +497,13 @@ impl Shard {
                     } else {
                         target_datagram_size
                     };
-                    let mut buffer = vec![0; payload_limit + 22 + 1];
+                    let mut buffer = vec![
+                        0;
+                        crate::tunnel::udp::recv_buffer_size(
+                            recv_association.as_deref(),
+                            payload_limit,
+                        )
+                    ];
                     loop {
                         let len = match crate::tunnel::udp::recv_payload(
                             &recv_socket,

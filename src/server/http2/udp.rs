@@ -109,7 +109,7 @@ pub(super) async fn serve(
     let target_to_client = async {
         // One extra byte detects a datagram larger than the configured limit;
         // never forward a silently truncated prefix.
-        let mut recv = vec![0_u8; max_payload + 22 + 1];
+        let mut recv = vec![0_u8; socket.recv_buffer_size(max_payload)];
         loop {
             let mut read = socket.recv(&mut recv).await?;
             let mut capsules = Vec::new();

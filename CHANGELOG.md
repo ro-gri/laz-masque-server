@@ -7,6 +7,11 @@ pre-1.0.
 
 ## Unreleased
 
+### Changed
+
+- Size SOCKS5 UDP receive buffers by the configured upstream packet limit on
+  H2 and H3, preserving truncation detection and portable single-packet reads.
+
 ### Added
 
 - Add `reload-direct-cidrs` over the private local control socket to apply only

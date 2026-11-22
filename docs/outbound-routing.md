@@ -13,6 +13,15 @@ It preserves TCP half-close and empty UDP datagrams. Provider-specific limits
 are explicit deployment overrides, not generic defaults. Hysteria2 is one
 interop target, not a runtime dependency or the definition of SOCKS5 behavior.
 
+AmneziaWG can also be used through a separate `awg-wireproxy` SOCKS5 process.
+The tested adapter is `bropines/awg-wireproxy` v2.1.0: TCP CONNECT and UDP
+ASSOCIATE work without a kernel TUN interface on the MASQUE gateway. The
+remote AmneziaWG server still terminates an IP tunnel. Do not enable the
+adapter's optional domain-based DIRECT bypass when MASQUE owns the routing
+decision. This adapter does not require Hysteria's 4000-byte packet-budget
+override. Compatibility and measured resource costs are recorded in
+[the AmneziaWG validation](outbound-validation.md#amneziawg-via-awg-wireproxy).
+
 Current scope is local SOCKS5 CONNECT and UDP ASSOCIATE with IP destinations,
 no-auth or username/password authentication. It is not every SOCKS5 feature:
 remote endpoints, a UDP relay on a different IP, domain-valued UDP relay
@@ -151,6 +160,17 @@ DIRECT preserves its batched receive/send and optional GSO path. SOCKS5 uses
 portable asynchronous receive plus existing response queues and disables target
 GSO. HTTP/2 preserves capsule framing and flow control. It does not encapsulate
 SOCKS headers into MASQUE payloads.
+
+SOCKS5 receive buffers use `min(client_payload_limit + 22,
+udp_max_packet_size) + 1` bytes on all supported platforms. The 22-byte
+allowance accepts either IP header, including IPv4-mapped IPv6 responses;
+the extra byte detects truncated packets, which are discarded. Full upstream
+packet and decoded payload limits still apply. At a 4000-byte upstream limit,
+H2 and H3 capsule reception allocate 4001 bytes instead of 65550 bytes per
+tunnel (about 15.03 MiB less buffer storage across 256 tunnels). This is an
+allocation bound, not a guaranteed RSS reduction. Native H3 already uses a
+smaller transport bound. DIRECT allocation and the generic 65507-byte SOCKS5
+default are unchanged; no Hysteria-specific limit is inferred.
 
 Incoming UDP checks both the connected outer relay and the pinned target
 IP/port in the SOCKS header. Malformed RSV/ATYP, FRAG != 0, wrong target and

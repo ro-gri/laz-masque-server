@@ -182,6 +182,10 @@ impl Http2UdpTarget {
         self.target_addr
     }
 
+    pub(crate) fn recv_buffer_size(&self, payload_limit: usize) -> usize {
+        recv_buffer_size(self.association.as_deref(), payload_limit)
+    }
+
     pub(crate) async fn closed(&self) -> std::io::Error {
         association_closed(self.association.as_deref()).await
     }
@@ -221,6 +225,18 @@ pub(crate) async fn association_closed(association: Option<&UdpAssociation>) -> 
     }
 }
 
+/// Preserve room for either IP header (including IPv4-mapped IPv6), but
+/// never allocate beyond the upstream's full packet budget. The extra byte
+/// detects truncation on platforms whose recv API does not expose MSG_TRUNC.
+/// DIRECT retains its existing allocation and payload checks.
+pub(crate) fn recv_buffer_size(
+    association: Option<&UdpAssociation>,
+    payload_limit: usize,
+) -> usize {
+    let packet_limit = payload_limit + 22;
+    association.map_or(packet_limit, |a| packet_limit.min(a.max_packet_size())) + 1
+}
+
 fn decode_received(
     association: Option<&UdpAssociation>,
     buffer: &mut [u8],
@@ -230,7 +246,7 @@ fn decode_received(
         return Some(len);
     };
     // A full buffer might be a truncated packet; callers allocate one extra
-    // byte beyond the accepted payload plus maximum SOCKS5 IP header.
+    // byte beyond the smaller of the upstream and transport packet limits.
     if len == buffer.len() {
         return None;
     }

@@ -144,6 +144,11 @@ pub(super) async fn associate(
 }
 
 impl UdpAssociation {
+    /// Full SOCKS5 packet budget, including its IP header.
+    pub(crate) fn max_packet_size(&self) -> usize {
+        self.max_payload + self.header.len()
+    }
+
     /// No legal application data travels on the association's TCP control
     /// channel after setup. EOF, error or unsolicited data tears it down.
     pub(crate) async fn closed(&self) -> io::Error {

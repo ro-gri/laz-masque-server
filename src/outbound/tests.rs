@@ -454,3 +454,77 @@ fn direct_reload_does_not_read_password_and_rejects_missing_file() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn sized_udp_receive_buffer_preserves_boundaries_and_rejects_truncation() {
+    use crate::tunnel::udp::{recv_buffer_size, recv_payload};
+
+    let proxy = mock::MockSocks::start().await;
+    assert_eq!(recv_buffer_size(None, 65507), 65530);
+    for target in ["203.0.113.1:53", "[2001:db9::1]:53"] {
+        for budget in [4000, 65507] {
+            let mut c = config(proxy.addr);
+            c.socks5.as_mut().unwrap().udp_max_packet_size = budget;
+            let router = Router::load(&c).unwrap();
+            let (_socket, association) = router.associate(target.parse().unwrap()).await.unwrap();
+            assert_eq!(recv_buffer_size(Some(&association), 65507), budget + 1);
+            assert_eq!(recv_buffer_size(Some(&association), 1350), 1373);
+            if budget != 4000 {
+                continue;
+            }
+            // A local sender allows malformed/oversized frames independently
+            // of the encoder's outbound validation.
+            let receiver = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+            let sender = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+            sender
+                .connect(receiver.local_addr().unwrap())
+                .await
+                .unwrap();
+            receiver
+                .connect(sender.local_addr().unwrap())
+                .await
+                .unwrap();
+            let mut buffer = vec![0; recv_buffer_size(Some(&association), 65507)];
+            let mut header = Vec::new();
+            assert!(association.encode(&[], &mut header));
+            let mut headers = vec![header];
+            if target.starts_with("203") {
+                let mut mapped = vec![0, 0, 0, 4];
+                mapped.extend_from_slice(
+                    &"::ffff:203.0.113.1"
+                        .parse::<std::net::Ipv6Addr>()
+                        .unwrap()
+                        .octets(),
+                );
+                mapped.extend_from_slice(&53u16.to_be_bytes());
+                headers.push(mapped);
+            }
+            for header in headers {
+                for size in [header.len(), 3999, 4000, 4001, 8000] {
+                    let mut frame = header.clone();
+                    frame.resize(size, 42);
+                    sender.send(&frame).await.unwrap();
+                    let mut marker = Vec::new();
+                    assert!(association.encode(b"next", &mut marker));
+                    // Oversized packets must be skipped, including a truncated
+                    // prefix that would otherwise decode as a valid packet.
+                    if size > budget {
+                        sender.send(&marker).await.unwrap();
+                    }
+                    let len = tokio::time::timeout(
+                        Duration::from_secs(2),
+                        recv_payload(&receiver, Some(&association), &mut buffer),
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap();
+                    if size > budget {
+                        assert_eq!(&buffer[..len], b"next");
+                    } else {
+                        assert_eq!(&buffer[..len], &frame[header.len()..]);
+                    }
+                }
+            }
+        }
+    }
+}
