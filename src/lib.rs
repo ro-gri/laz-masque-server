@@ -15,6 +15,7 @@ pub mod ip_packet;
 mod metrics;
 mod net;
 mod observability;
+mod outbound;
 pub mod policy;
 pub mod routing;
 mod runtime_status;

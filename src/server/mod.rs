@@ -368,6 +368,7 @@ impl Server {
         config_path: Option<std::path::PathBuf>,
     ) -> anyhow::Result<Self> {
         let ValidatedServerConfig {
+            outbound,
             clients,
             tls,
             listeners,
@@ -395,7 +396,8 @@ impl Server {
         let connect_ip_available = connect_ip_capability(&config, tun.is_some());
         let metrics = Arc::new(
             Metrics::new(config.observability.listen_addr.is_some())
-                .with_connect_ip(config.ip_proxy.enabled, connect_ip_available),
+                .with_connect_ip(config.ip_proxy.enabled, connect_ip_available)
+                .with_outbound(Arc::clone(&outbound)),
         );
 
         let mut key_bytes = [0u8; 64];
@@ -430,10 +432,12 @@ impl Server {
             &config,
             config_path.as_deref(),
             tls.fingerprints(),
+            outbound.files_digest,
         )?);
         let config_reload = config_reload_settings(&config, config_path);
 
         let shared = Arc::new(Shared {
+            outbound,
             loaded_config,
             ip_policy: TargetPolicy::new(
                 &config.ip_proxy.allow_targets,
@@ -1518,6 +1522,7 @@ struct ReloadListener {
 /// owner, and the ownership maps only when a connection is created or
 /// destroyed, or one of its connection IDs is published or retired.
 struct Shared {
+    outbound: Arc<crate::outbound::Router>,
     loaded_config: Arc<crate::runtime_status::LoadedConfig>,
     /// Immutable destination ACL, shared by both CONNECT-IP transports.
     ip_policy: TargetPolicy,

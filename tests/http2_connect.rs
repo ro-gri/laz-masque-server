@@ -43,6 +43,9 @@ mod timeouts;
 #[path = "http2_connect/udp_capsules.rs"]
 mod udp_capsules;
 
+#[path = "http2_connect/outbound.rs"]
+mod outbound;
+
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 #[cfg(unix)]
 static SIGHUP_TEST_LOCK: LazyLock<tokio::sync::Mutex<()>> =

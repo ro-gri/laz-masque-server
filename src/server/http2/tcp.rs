@@ -34,6 +34,7 @@ pub(super) async fn serve(
         &context.tcp_policy,
         Duration::from_secs(context.config.tcp_proxy.connect_timeout_secs),
         &context.resolver,
+        Arc::clone(&context.shared.outbound),
     );
     let Some(result) = until_reset(&mut respond, setup).await else {
         return Ok(());

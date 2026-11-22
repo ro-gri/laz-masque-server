@@ -18,6 +18,7 @@ use tracing::warn;
 #[cfg(target_os = "linux")]
 use crate::net::target_udp;
 use crate::net::target_udp::TARGET_BATCH_SIZE;
+use crate::outbound::UdpAssociation;
 use crate::policy::TargetPolicy;
 use crate::uri::UdpTarget;
 
@@ -133,24 +134,123 @@ pub(crate) struct ConnectedUdpTarget {
     send_socket: std::net::UdpSocket,
     recv_socket: UdpSocket,
     udp_gso: bool,
+    association: Option<Arc<UdpAssociation>>,
 }
 
 impl ConnectedUdpTarget {
     /// HTTP/2 uses Tokio's socket in both directions and does not need the
     /// duplicate descriptor retained by the HTTP/3 batching path.
-    pub(crate) fn into_http2(self) -> (UdpSocket, SocketAddr) {
-        (self.recv_socket, self.target_addr)
+    pub(crate) fn into_http2(self) -> Http2UdpTarget {
+        Http2UdpTarget {
+            target_addr: self.target_addr,
+            recv_socket: self.recv_socket,
+            association: self.association,
+        }
     }
 
-    /// Split out every descriptor and the negotiated offload state HTTP/3
-    /// needs when it installs the live tunnel.
-    pub(crate) fn into_http3(self) -> (std::net::UdpSocket, Arc<UdpSocket>, SocketAddr, bool) {
+    /// Direct descriptors retain their existing batched I/O path. SOCKS5
+    /// descriptors carry framed UDP and must never enter that raw path.
+    pub(crate) fn into_http3(
+        self,
+    ) -> (
+        std::net::UdpSocket,
+        Arc<UdpSocket>,
+        SocketAddr,
+        bool,
+        Option<Arc<UdpAssociation>>,
+    ) {
         (
             self.send_socket,
             Arc::new(self.recv_socket),
             self.target_addr,
             self.udp_gso,
+            self.association,
         )
+    }
+}
+
+/// HTTP/2 needs only one UDP descriptor; the H3 send duplicate is dropped
+/// when converting the prepared target.
+pub(crate) struct Http2UdpTarget {
+    target_addr: SocketAddr,
+    recv_socket: UdpSocket,
+    association: Option<Arc<UdpAssociation>>,
+}
+
+impl Http2UdpTarget {
+    pub(crate) fn target_addr(&self) -> SocketAddr {
+        self.target_addr
+    }
+
+    pub(crate) async fn closed(&self) -> std::io::Error {
+        association_closed(self.association.as_deref()).await
+    }
+
+    pub(crate) async fn send(
+        &self,
+        payload: &[u8],
+        packet: &mut Vec<u8>,
+    ) -> std::io::Result<usize> {
+        if let Some(association) = &self.association {
+            if !association.encode(payload, packet) {
+                return Ok(payload.len());
+            }
+            self.recv_socket.send(packet).await?;
+            Ok(payload.len())
+        } else {
+            self.recv_socket.send(payload).await
+        }
+    }
+
+    pub(crate) async fn recv(&self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        recv_payload(&self.recv_socket, self.association.as_deref(), buffer).await
+    }
+
+    pub(crate) fn try_recv(&self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let len = self.recv_socket.try_recv(buffer)?;
+        decode_received(self.association.as_deref(), buffer, len)
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::WouldBlock))
+    }
+}
+
+/// A separate lifecycle future also runs while response delivery is blocked.
+pub(crate) async fn association_closed(association: Option<&UdpAssociation>) -> std::io::Error {
+    match association {
+        Some(association) => association.closed().await,
+        None => std::future::pending().await,
+    }
+}
+
+fn decode_received(
+    association: Option<&UdpAssociation>,
+    buffer: &mut [u8],
+    len: usize,
+) -> Option<usize> {
+    let Some(association) = association else {
+        return Some(len);
+    };
+    // A full buffer might be a truncated packet; callers allocate one extra
+    // byte beyond the accepted payload plus maximum SOCKS5 IP header.
+    if len == buffer.len() {
+        return None;
+    }
+    let payload = association.decode(&buffer[..len])?;
+    let payload_len = payload.len();
+    let start = len - payload_len;
+    buffer.copy_within(start..len, 0);
+    Some(payload_len)
+}
+
+pub(crate) async fn recv_payload(
+    socket: &UdpSocket,
+    association: Option<&UdpAssociation>,
+    buffer: &mut [u8],
+) -> std::io::Result<usize> {
+    loop {
+        let len = socket.recv(buffer).await?;
+        if let Some(len) = decode_received(association, buffer, len) {
+            return Ok(len);
+        }
     }
 }
 
@@ -230,6 +330,7 @@ impl Drop for PendingUdpTunnel {
 /// Resolve and connect one UDP target under a single deadline. Both HTTP/2 and
 /// HTTP/3 call this function, so policy always evaluates the same address
 /// snapshot the socket subsequently uses.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn connect_udp_target(
     target: UdpTarget,
     policy: &TargetPolicy,
@@ -237,13 +338,26 @@ pub(crate) async fn connect_udp_target(
     enable_udp_gso: bool,
     max_datagram_size: usize,
     resolver: &TargetResolver,
+    outbound: &crate::outbound::Router,
 ) -> Result<ConnectedUdpTarget, TargetSetupFailure> {
     let deadline = tokio::time::Instant::now() + timeout;
     let resolved = resolve_allowed(&target.host, target.port, policy, deadline, resolver).await?;
     let mut last_error = None;
 
     for target_addr in resolved.into_addresses() {
-        match open_connected_udp(target_addr, enable_udp_gso, max_datagram_size) {
+        outbound.record_attempt(true, target_addr.ip());
+        let opened = if outbound.route(target_addr.ip()) == crate::config::OutboundRoute::Socks5 {
+            match tokio::time::timeout_at(deadline, outbound.associate(target_addr)).await {
+                Err(_) => return Err(TargetSetupFailure::timeout("SOCKS5 UDP setup")),
+                Ok(Err(error)) => Err(error),
+                Ok(Ok((send_socket, association))) => {
+                    prepare_udp_socket(send_socket, target_addr, false, Some(association))
+                }
+            }
+        } else {
+            open_connected_udp(target_addr, enable_udp_gso, max_datagram_size)
+        };
+        match opened {
             Ok(socket) => return Ok(socket),
             Err(error) => last_error = Some(error),
         }
@@ -282,15 +396,24 @@ fn open_connected_udp(
         false
     };
 
+    prepare_udp_socket(send_socket, target_addr, udp_gso, None)
+}
+
+fn prepare_udp_socket(
+    send_socket: std::net::UdpSocket,
+    target_addr: SocketAddr,
+    udp_gso: bool,
+    association: Option<Arc<UdpAssociation>>,
+) -> std::io::Result<ConnectedUdpTarget> {
     let recv_socket = send_socket.try_clone()?;
     recv_socket.set_nonblocking(true)?;
     let recv_socket = UdpSocket::from_std(recv_socket)?;
-
     Ok(ConnectedUdpTarget {
         target_addr,
         send_socket,
         recv_socket,
         udp_gso,
+        association,
     })
 }
 
@@ -306,6 +429,7 @@ pub(crate) fn spawn_udp_setup(
     max_datagram_size: usize,
     result_tx: mpsc::Sender<UdpSetupResult>,
     resolver: TargetResolver,
+    outbound: Arc<crate::outbound::Router>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let result = connect_udp_target(
@@ -315,6 +439,7 @@ pub(crate) fn spawn_udp_setup(
             enable_udp_gso,
             max_datagram_size,
             &resolver,
+            &outbound,
         )
         .await;
         let _ = result_tx
@@ -329,6 +454,7 @@ pub(crate) fn spawn_udp_setup(
 
 /// State for a single CONNECT-UDP tunnel.
 pub struct UdpTunnel {
+    association: Option<Arc<UdpAssociation>>,
     /// The HTTP/3 stream ID this tunnel is bound to.
     pub stream_id: u64,
     /// Tokio socket used by the background target-response receiver.
@@ -383,6 +509,7 @@ impl UdpTunnel {
         );
 
         Ok(Self {
+            association: None,
             stream_id,
             socket: Arc::new(socket),
             send_socket,
@@ -396,6 +523,7 @@ impl UdpTunnel {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_socket(
         stream_id: u64,
         target_addr: SocketAddr,
@@ -403,11 +531,13 @@ impl UdpTunnel {
         socket: Arc<UdpSocket>,
         recv_task: JoinHandle<()>,
         udp_gso: bool,
+        association: Option<Arc<UdpAssociation>>,
     ) -> Self {
         #[cfg(not(target_os = "linux"))]
         let _ = udp_gso;
 
         Self {
+            association,
             stream_id,
             socket,
             send_socket,
@@ -423,7 +553,15 @@ impl UdpTunnel {
 
     /// Forward a payload from the client to the target.
     pub async fn send_to_target(&mut self, payload: &[u8]) -> std::io::Result<()> {
-        self.socket.send(payload).await?;
+        if let Some(association) = &self.association {
+            let mut packet = Vec::new();
+            if !association.encode(payload, &mut packet) {
+                return Ok(());
+            }
+            self.socket.send(&packet).await?;
+        } else {
+            self.socket.send(payload).await?;
+        }
         self.last_activity = Instant::now();
         Ok(())
     }
@@ -431,6 +569,15 @@ impl UdpTunnel {
     /// Forward a payload immediately without depending on Tokio's cached
     /// writable readiness for this newly registered socket.
     pub fn try_send_to_target(&mut self, payload: &[u8]) -> std::io::Result<()> {
+        let mut packet = Vec::new();
+        let payload = if let Some(association) = &self.association {
+            if !association.encode(payload, &mut packet) {
+                return Ok(());
+            }
+            packet.as_slice()
+        } else {
+            payload
+        };
         let sent = self.send_socket.send(payload)?;
         if sent != payload.len() {
             return Err(std::io::Error::new(
@@ -451,8 +598,14 @@ impl UdpTunnel {
                 .push(Vec::with_capacity(payload.len().max(1_500)));
         }
         let buffer = &mut self.send_stage[self.staged];
-        buffer.clear();
-        buffer.extend_from_slice(payload);
+        if let Some(association) = &self.association {
+            if !association.encode(payload, buffer) {
+                return false;
+            }
+        } else {
+            buffer.clear();
+            buffer.extend_from_slice(payload);
+        }
         self.staged += 1;
         self.staged >= TARGET_BATCH_SIZE
     }
@@ -522,7 +675,7 @@ impl UdpTunnel {
 
     /// Wait for a packet from the target.
     pub async fn recv_from_target(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let n = self.socket.recv(buf).await?;
+        let n = recv_payload(&self.socket, self.association.as_deref(), buf).await?;
         self.last_activity = Instant::now();
         Ok(n)
     }
@@ -570,13 +723,17 @@ mod tests {
             false,
             1350,
             &super::super::resolver::ResolverBudget::default().connection(),
+            &crate::outbound::Router::load(&Default::default()).unwrap(),
         )
         .await
         .unwrap();
-        let (socket, connected_addr) = prepared.into_http2();
-        assert_eq!(connected_addr, target_addr);
+        let socket = prepared.into_http2();
+        assert_eq!(socket.target_addr(), target_addr);
 
-        socket.send(b"checked snapshot").await.unwrap();
+        socket
+            .send(b"checked snapshot", &mut Vec::new())
+            .await
+            .unwrap();
         let mut received = [0_u8; 64];
         let (len, _) =
             tokio::time::timeout(Duration::from_secs(1), target.recv_from(&mut received))

@@ -7,6 +7,16 @@ pre-1.0.
 
 ## Unreleased
 
+### Added
+
+- Route CONNECT and CONNECT-UDP destinations by IP/CIDR through DIRECT or a
+  local SOCKS5 upstream on HTTP/2 and HTTP/3. Preserve target ACLs, checked
+  DNS snapshots, bounded setup and fail-closed proxy behavior. Existing
+  configurations remain DIRECT; CONNECT-IP is independent.
+- Add upstream authentication, UDP association and packet-size limits,
+  restart-required tracking for external CIDR/password files, outbound
+  metrics, and isolated Hysteria2 interoperability/load checks.
+
 ## 0.15.0 - 2026-11-20
 
 ### Added

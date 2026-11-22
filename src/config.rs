@@ -11,6 +11,8 @@ pub struct ServerConfig {
     #[serde(default)]
     pub server: ServerSection,
     #[serde(default)]
+    pub outbound: OutboundSection,
+    #[serde(default)]
     pub tls: TlsSection,
     #[serde(default)]
     pub quic: QuicSection,
@@ -450,6 +452,7 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             server: ServerSection::default(),
+            outbound: OutboundSection::default(),
             tls: TlsSection::default(),
             quic: QuicSection::default(),
             http2: Http2Section::default(),
@@ -1280,5 +1283,50 @@ mod target_defaults_tests {
         assert!(!udp.is_allowed("10.20.0.1".parse().unwrap()));
         let explicit = parse_toml(&format!("{LISTENER}[udp_proxy]\ndeny_targets = []\n")).unwrap();
         assert!(explicit.udp_proxy.deny_targets.is_empty());
+    }
+}
+
+/// Application-level egress routing, independent of target access policy.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct OutboundSection {
+    pub default_route: OutboundRoute,
+    pub direct_cidrs: Vec<String>,
+    /// One CIDR per line; comments begin with #. Absolute path required.
+    pub direct_cidrs_file: Option<PathBuf>,
+    pub socks5: Option<Socks5Section>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OutboundRoute {
+    #[default]
+    Direct,
+    Socks5,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Socks5Section {
+    /// A concrete loopback address; never resolved through target DNS.
+    pub endpoint: SocketAddr,
+    pub username: Option<String>,
+    pub password_file: Option<PathBuf>,
+    pub max_connecting: usize,
+    pub max_udp_associations: usize,
+    /// Maximum complete SOCKS5 UDP packet, including its address header.
+    pub udp_max_packet_size: usize,
+}
+
+impl Default for Socks5Section {
+    fn default() -> Self {
+        Self {
+            endpoint: "127.0.0.1:1080".parse().unwrap(),
+            username: None,
+            password_file: None,
+            max_connecting: 128,
+            max_udp_associations: 1024,
+            udp_max_packet_size: 65_507,
+        }
     }
 }

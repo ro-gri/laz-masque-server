@@ -152,6 +152,7 @@ can require TUN creation at startup with `ip_proxy.require_tun = true`.
 | `src/scheduler.rs` | Dirty-connection scheduling and one replaceable deadline per connection |
 | `src/runtime_status.rs` | Private local socket and keyed loaded-configuration fingerprints |
 | `src/auth.rs` | Basic credential parsing and Argon2id verification |
+| `src/outbound/` | Shared immutable CIDR routing, bounded SOCKS5 setup, UDP framing/control lifetime |
 | `src/policy.rs` | CIDR target allow/deny decisions |
 | `src/tun.rs` | Linux TUN creation and offloaded packet batches |
 | `src/address_pool.rs` | CONNECT-IP address allocation |
@@ -437,3 +438,10 @@ binaries.
 
 These bounds are part of correctness. Changes that replace a bound with an
 implicitly growing `Vec`, task queue, or channel require explicit review.
+
+## Optional outbound routing
+
+After the shared target ACL check, CONNECT and CONNECT-UDP select DIRECT or
+SOCKS5 per checked IP. Both HTTP transports share one immutable router and
+upstream capacity budgets. See [Outbound routing](outbound-routing.md) for
+ownership, framing and failure semantics. CONNECT-IP routing is independent.

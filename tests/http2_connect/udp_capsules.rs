@@ -5,7 +5,7 @@ use super::*;
 #[path = "../support/udp_capsules.rs"]
 mod wire_fixtures;
 
-fn udp_request(target: std::net::SocketAddr) -> Request<()> {
+pub(super) fn udp_request(target: std::net::SocketAddr) -> Request<()> {
     let mut request = Request::builder()
         .method(Method::CONNECT)
         .uri(format!(
@@ -40,7 +40,11 @@ fn datagram_capsule(context: &[u8], payload: &[u8]) -> Vec<u8> {
     wire
 }
 
-async fn assert_echo(target: &UdpSocket, response_body: &mut h2::RecvStream, payload: &[u8]) {
+pub(super) async fn assert_echo(
+    target: &UdpSocket,
+    response_body: &mut h2::RecvStream,
+    payload: &[u8],
+) {
     let mut received = vec![0; payload.len() + 1];
     let (length, peer) =
         tokio::time::timeout(Duration::from_secs(2), target.recv_from(&mut received))

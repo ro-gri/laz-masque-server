@@ -448,3 +448,11 @@ that, and all three were hit while qualifying this feature:
 - Tag only the commit that passed these checks.
 
 Tags containing a hyphen are published as GitHub pre-releases.
+
+## SOCKS5 outbound routing
+
+Run `cargo test --lib outbound`, the `socks5` tests in both HTTP integration
+suites, and `cargo test --test check_config`. For isolated real Hysteria2
+interop use `HYSTERIA_BIN=/absolute/path/to/hysteria python3 scripts/test-hysteria.py`.
+The binary must be verified independently. See [Outbound routing](outbound-routing.md)
+for coverage, resource limits and the benchmark/deployment gate.

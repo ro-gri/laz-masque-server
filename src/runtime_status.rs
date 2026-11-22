@@ -38,6 +38,7 @@ impl LoadedConfig {
         config: &ServerConfig,
         path: Option<&Path>,
         tls: TlsFingerprints,
+        outbound_files: [u8; 32],
     ) -> anyhow::Result<Self> {
         let mut key = [0; 32];
         ring::rand::SystemRandom::new()
@@ -52,7 +53,7 @@ impl LoadedConfig {
         snapshot.config_file = path
             .map(|path| file_digest(&snapshot.key, path))
             .transpose()?;
-        snapshot.sections = sections(&snapshot.key, config, tls)?;
+        snapshot.sections = sections(&snapshot.key, config, tls, Some(outbound_files))?;
         Ok(Self(Mutex::new(snapshot)))
     }
 
@@ -68,7 +69,7 @@ impl LoadedConfig {
             .lock()
             .expect("loaded configuration poisoned")
             .clone();
-        for (name, section) in sections(&snapshot.key, config, tls)? {
+        for (name, section) in sections(&snapshot.key, config, tls, None)? {
             if section.reloadable {
                 snapshot.sections.insert(name, section);
             }
@@ -97,8 +98,14 @@ fn sections(
     key: &[u8; 32],
     config: &ServerConfig,
     tls: TlsFingerprints,
+    outbound_files: Option<[u8; 32]>,
 ) -> anyhow::Result<BTreeMap<String, Section>> {
     let mut value = serde_json::to_value(config)?;
+    let files = match outbound_files {
+        Some(files) => files,
+        None => crate::outbound::Router::load(&config.outbound)?.files_digest,
+    };
+    value["outbound"]["files_digest"] = serde_json::json!(files);
     // Ignore disabled authentication material and the obsolete stealth switch.
     let credentials: Vec<_> = config.listeners.iter().map(|listener| {
         if listener.auth.basic_enabled() {
@@ -160,7 +167,7 @@ impl Snapshot {
             self.config_file == Some(file_digest(&self.key, path)?),
             "selected file is not the running process's configuration file"
         );
-        let disk = sections(&self.key, config, tls)?;
+        let disk = sections(&self.key, config, tls, None)?;
         anyhow::ensure!(
             self.sections.len() == disk.len(),
             "runtime status schema differs"

@@ -1070,6 +1070,9 @@ fn status_compares_running_config_and_successful_reload_without_exposing_values(
         "bbr2",
     ))
     .unwrap();
+    let routes = dir.path().join("direct-cidrs.txt");
+    std::fs::write(&routes, "192.0.2.0/24\n").unwrap();
+    cfg.outbound.direct_cidrs_file = Some(routes.clone());
     cfg.listeners[0].auth.enabled = true;
     cfg.listeners[0].auth.username = "runtime-status-user-sentinel".into();
     cfg.listeners[0].auth.password_hash = masque::auth::hash_password(b"first-password").unwrap();
@@ -1148,11 +1151,13 @@ fn status_compares_running_config_and_successful_reload_without_exposing_values(
         0o600
     );
 
+    std::fs::write(&routes, "203.0.113.0/24\n").unwrap();
     cfg.udp_proxy.deny_targets.clear();
     cfg.listeners[0].auth.password_hash = masque::auth::hash_password(b"second-password").unwrap();
     write_config(&cfg);
     let _ = write_server_identity(dir.path());
     wait_for(&[
+        "outbound: restart required",
         "udp_proxy: restart required",
         "basic_credentials: reload required",
         "tls_identity: reload required",
@@ -1168,6 +1173,7 @@ fn status_compares_running_config_and_successful_reload_without_exposing_values(
     };
     signal();
     wait_for(&[
+        "outbound: restart required",
         "udp_proxy: restart required",
         "basic_credentials: applied",
         "tls_identity: applied",
