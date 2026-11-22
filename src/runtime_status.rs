@@ -1,5 +1,6 @@
 //! Private, live configuration evidence. Only keyed fingerprints cross the
 //! owner-only local socket; no credentials, paths or configuration are sent.
+//! Request byte S reads status; R reloads only the startup DIRECT CIDR file.
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -78,7 +79,31 @@ impl LoadedConfig {
     }
 
     pub(crate) fn commit_reload(&self, snapshot: Snapshot) {
-        *self.0.lock().expect("loaded configuration poisoned") = snapshot;
+        let mut current = self.0.lock().expect("loaded configuration poisoned");
+        for (name, section) in snapshot.sections {
+            if section.reloadable {
+                current.sections.insert(name, section);
+            }
+        }
+    }
+    /// Publish only the outbound evidence and ranges. No file or TOML is read here.
+    fn install_direct_reload(
+        &self,
+        router: &crate::outbound::Router,
+        ranges: Arc<crate::outbound::DirectRanges>,
+    ) -> anyhow::Result<bool> {
+        let mut snapshot = self.0.lock().expect("loaded configuration poisoned");
+        let mut value = serde_json::to_value(router.config())?;
+        value["files_digest"] = serde_json::json!(ranges.files_digest);
+        let bytes = zeroize::Zeroizing::new(serde_json::to_vec(&value)?);
+        let section = Section {
+            digest: digest(&snapshot.key, &bytes),
+            reloadable: false,
+        };
+        let changed = router.files_digest() != ranges.files_digest;
+        router.install_direct_ranges(ranges);
+        snapshot.sections.insert("outbound".into(), section);
+        Ok(changed)
     }
 }
 
@@ -103,7 +128,7 @@ fn sections(
     let mut value = serde_json::to_value(config)?;
     let files = match outbound_files {
         Some(files) => files,
-        None => crate::outbound::Router::load(&config.outbound)?.files_digest,
+        None => crate::outbound::Router::load(&config.outbound)?.files_digest(),
     };
     value["outbound"]["files_digest"] = serde_json::json!(files);
     // Ignore disabled authentication material and the obsolete stealth switch.
@@ -197,7 +222,7 @@ mod socket {
     use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _, PermissionsExt as _};
     use std::path::PathBuf;
     use std::time::Duration;
-    use tokio::io::AsyncWriteExt as _;
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
     pub struct StatusServer {
         task: tokio::task::JoinHandle<()>,
@@ -220,6 +245,7 @@ mod socket {
     pub(crate) async fn start(
         path: &Path,
         state: Arc<LoadedConfig>,
+        router: Arc<crate::outbound::Router>,
     ) -> anyhow::Result<StatusServer> {
         // SAFETY: geteuid takes no pointers and only returns the process identity.
         let uid = unsafe { libc::geteuid() };
@@ -259,9 +285,44 @@ mod socket {
         let metadata = std::fs::symlink_metadata(path)?;
         let task = tokio::spawn(async move {
             while let Ok((mut stream, _)) = listener.accept().await {
-                let bytes = {
-                    let snapshot = state.0.lock().expect("loaded configuration poisoned");
-                    serde_json::to_vec(&*snapshot).expect("fixed runtime status schema serializes")
+                // Fixed one-byte protocol, one peer and at most one file loader.
+                // Slow or disconnected peers cannot enqueue unbounded blocking work.
+                let request = tokio::time::timeout(Duration::from_secs(1), stream.read_u8()).await;
+                let bytes = match request {
+                    Ok(Ok(b'S')) => {
+                        let snapshot = state.0.lock().expect("loaded configuration poisoned");
+                        serde_json::to_vec(&*snapshot)
+                            .expect("fixed runtime status schema serializes")
+                    }
+                    Ok(Ok(b'R')) => {
+                        let loader = Arc::clone(&router);
+                        let result =
+                            tokio::task::spawn_blocking(move || loader.prepare_direct_reload())
+                                .await;
+                        let result = match result {
+                            Ok(Ok(ranges)) => state.install_direct_reload(&router, ranges),
+                            Ok(Err(error)) => Err(error),
+                            Err(_) => Err(anyhow::anyhow!("DIRECT loader failed")),
+                        };
+                        match result {
+                            Ok(changed) => {
+                                tracing::info!(changed, "DIRECT CIDR reload completed");
+                                if changed {
+                                    b"updated\n".to_vec()
+                                } else {
+                                    b"unchanged\n".to_vec()
+                                }
+                            }
+                            Err(error) => {
+                                tracing::warn!(%error,
+                                    "DIRECT CIDR reload rejected; previous routes retained"
+                                );
+                                b"error: DIRECT CIDR reload rejected; previous routes retained\n"
+                                    .to_vec()
+                            }
+                        }
+                    }
+                    _ => b"error: unsupported local control request\n".to_vec(),
                 };
                 // One bounded writer, no spawned task or input buffer per peer.
                 let _ =
@@ -284,13 +345,14 @@ mod socket {
             metadata.file_type().is_socket() && metadata.mode() & 0o077 == 0,
             "runtime status socket is not private"
         );
-        let stream = tokio::time::timeout(
+        let mut stream = tokio::time::timeout(
             Duration::from_secs(1),
             tokio::net::UnixStream::connect(path),
         )
         .await
         .context("runtime status connection timed out")?
         .context("runtime status process is unavailable")?;
+        stream.write_all(b"S").await?;
         let mut bytes = Vec::new();
         tokio::time::timeout(
             Duration::from_secs(1),
@@ -304,9 +366,92 @@ mod socket {
         );
         serde_json::from_slice(&bytes).context("invalid runtime status response")
     }
+    /// Reload only the running process's startup CIDR file. Never parse the disk config.
+    pub async fn reload_direct_cidrs(path: &Path) -> anyhow::Result<String> {
+        let metadata =
+            std::fs::symlink_metadata(path).context("local control socket unavailable")?;
+        anyhow::ensure!(
+            metadata.file_type().is_socket() && metadata.mode() & 0o077 == 0,
+            "local control socket is not private"
+        );
+        // SAFETY: geteuid has no arguments and does not mutate process state.
+        let uid = unsafe { libc::geteuid() };
+        anyhow::ensure!(
+            uid == 0 || metadata.uid() == uid,
+            "local control socket has another owner"
+        );
+        let exchange = async {
+            let mut stream = tokio::net::UnixStream::connect(path).await?;
+            stream.write_all(b"R").await?;
+            let mut bytes = Vec::new();
+            stream.take(257).read_to_end(&mut bytes).await?;
+            anyhow::ensure!(bytes.len() <= 256, "oversized local control response");
+            match bytes.as_slice() {
+                b"updated\n" => Ok("DIRECT CIDRs updated".to_owned()),
+                b"unchanged\n" => Ok("DIRECT CIDRs unchanged".to_owned()),
+                _ => anyhow::bail!(
+                    "DIRECT CIDR reload rejected or unsupported; inspect the server log and CIDR file"
+                ),
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(30), exchange)
+            .await
+            .context("reload response timed out; outcome unknown, retry the command")?
+    }
 }
 
 #[cfg(unix)]
 pub use socket::StatusServer;
 #[cfg(unix)]
+pub use socket::reload_direct_cidrs;
+#[cfg(unix)]
 pub(crate) use socket::{read, start};
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn credential_reload_cannot_overwrite_newer_direct_evidence() {
+        struct File(std::path::PathBuf);
+        impl Drop for File {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let name = format!("masque-direct-evidence-{}-{nonce}", std::process::id());
+        let file = File(std::env::temp_dir().join(name));
+        std::fs::write(&file.0, "192.0.2.0/24\n").unwrap();
+        let mut config = ServerConfig::default();
+        config.outbound.direct_cidrs_file = Some(file.0.clone());
+        let router = crate::outbound::Router::load(&config.outbound).unwrap();
+        let tls = || TlsFingerprints {
+            identity: [0; 32],
+            ech: None,
+        };
+        let state = LoadedConfig::new(&config, None, tls(), router.files_digest()).unwrap();
+        let stale = state.prepare_reload(&config, tls()).unwrap();
+        std::fs::write(&file.0, "203.0.113.0/24\n").unwrap();
+        assert!(
+            state
+                .install_direct_reload(&router, router.prepare_direct_reload().unwrap())
+                .unwrap()
+        );
+        let expected = state.0.lock().unwrap().sections["outbound"].digest;
+        state.commit_reload(stale);
+        assert_eq!(
+            state.0.lock().unwrap().sections["outbound"].digest,
+            expected
+        );
+        let snapshot = state.0.lock().unwrap();
+        let disk = sections(&snapshot.key, &config, tls(), None).unwrap();
+        assert_eq!(
+            snapshot.sections["outbound"].digest,
+            disk["outbound"].digest
+        );
+    }
+}

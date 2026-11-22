@@ -192,6 +192,9 @@ publishes only keyed fingerprints, never raw configuration or credentials.
 TLS identity evidence is derived from the certificate chain actually loaded.
 A successful credential/TLS reload updates only those sections; edited policies
 remain `restart required`. Failed reloads preserve the previous evidence.
+The separate `reload-direct-cidrs` command uses the same private socket to
+update only the startup DIRECT CIDR file and its outbound evidence; see
+[Outbound routing](outbound-routing.md). It does not apply other pending edits.
 
 The socket is mode 0600 in a mode-0700 runtime directory; use sudo or the service
 account. Custom invocations can set `--status-socket` on the server and status

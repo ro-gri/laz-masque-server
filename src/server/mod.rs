@@ -350,7 +350,12 @@ impl Server {
         &self,
         path: &std::path::Path,
     ) -> anyhow::Result<crate::runtime_status::StatusServer> {
-        crate::runtime_status::start(path, Arc::clone(&self.shared.loaded_config)).await
+        crate::runtime_status::start(
+            path,
+            Arc::clone(&self.shared.loaded_config),
+            Arc::clone(&self.shared.outbound),
+        )
+        .await
     }
 
     /// Create a new server bound to the configured address.
@@ -432,7 +437,7 @@ impl Server {
             &config,
             config_path.as_deref(),
             tls.fingerprints(),
-            outbound.files_digest,
+            outbound.files_digest(),
         )?);
         let config_reload = config_reload_settings(&config, config_path);
 

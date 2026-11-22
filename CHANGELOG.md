@@ -9,6 +9,10 @@ pre-1.0.
 
 ### Added
 
+- Add `reload-direct-cidrs` over the private local control socket to apply only
+  the startup DIRECT CIDR file without restarting or changing active tunnels.
+  Reject invalid files atomically and retain setup snapshots across DNS retries.
+
 - Route CONNECT and CONNECT-UDP destinations by IP/CIDR through DIRECT or a
   local SOCKS5 upstream on HTTP/2 and HTTP/3. Preserve target ACLs, checked
   DNS snapshots, bounded setup and fail-closed proxy behavior. Existing

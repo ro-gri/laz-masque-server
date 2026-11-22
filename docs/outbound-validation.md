@@ -115,3 +115,105 @@ client mode, country-prefix source/version, actual remote Hysteria path,
 service limits, restart/rollback procedure and long-duration resource behavior.
 The scheduled ASan/fuzz/resource-pressure release matrix remains a separate
 release gate.
+
+## Apple Network Relay review (2026-11-22)
+
+Reviewed branch `SOCKS5` at `fb43557` for the topology Apple Network Relay ->
+MASQUE A -> country CIDRs DIRECT / local SOCKS5 client -> encrypted exit B.
+Apple describes Network Relay as TCP/UDP connection proxying, not an IP VPN:
+https://developer.apple.com/videos/play/wwdc2023/10002/
+The applicable server paths are CONNECT and CONNECT-UDP; CONNECT-IP can remain
+disabled. Both SOCKS5 transport fixtures already disable IP proxying.
+
+Protocol-level fit is confirmed by source review and local tests, not by an
+iPhone session. No iOS device/profile was exercised. The actual profile must
+match listener TLS identity and authentication, HTTP/3 and HTTP/2 endpoints,
+and the configured CONNECT-UDP URI template. Basic authentication requires
+preemptive `Proxy-Authorization`; the server does not issue a challenge.
+The profile's domain/app scope also determines which traffic reaches A.
+System DNS resolution on A is outside the outbound routing policy.
+
+Repeated checks passed: 12 outbound unit tests, 3 focused H2/H3 SOCKS tests,
+2 isolated real Hysteria2 tests, and the complete H2/H3 integration suites
+(78 + 43 passed; the two real-Hysteria tests are normally ignored and were
+run separately). No VPS was accessed. awg-wireproxy interoperability was not
+executed; supporting SOCKS5 in principle is not a substitute for that test.
+
+Resource review:
+
+- CIDR intervals are built once and shared, with binary lookup during target
+  setup, not per packet. Metrics currently repeat the lookup once per attempt;
+  this is minor setup work, not a packet-path cost. There is no online GeoIP
+  request, embedded VPN engine, or additional userspace TCP/IP stack.
+- TCP reuses the existing relay after SOCKS negotiation. UDP adds one control
+  TCP connection per association, framing copies and 10/22-byte SOCKS headers.
+  HTTP/2 reuses its send scratch buffer; HTTP/3 reuses bounded send staging.
+  Control lifetime is readiness-driven, not a polling loop. Association and
+  setup limits bound counts, not total process memory including socket buffers.
+- DIRECT keeps the original I/O fast paths. Proxied H3 UDP receives one packet
+  per read/channel message instead of the DIRECT native Linux recvmmsg batch.
+  It also disables target GSO. This is a real throughput/CPU tradeoff; batching
+  framed receive packets is a possible future optimization requiring Linux
+  measurements and malformed/truncated-packet regression coverage.
+- H3 capsule fallback and H2 may retain roughly 64 KiB receive buffers per
+  tunnel even with the Hysteria 4000-byte packet budget. This is bounded but
+  not a claim of minimum possible memory at high association counts.
+- Hysteria client CPU/memory and kernel socket memory are additional costs.
+  Existing MASQUE-only RSS and short loopback benchmarks cannot establish
+  total A-side resource use or absence of leaks under a long soak.
+
+Conclusion: the architecture fits Network Relay without TUN, but neither
+zero overhead nor fully optimized UDP throughput is established. The upstream
+half-close, empty-datagram and packet-size limitations documented above remain.
+
+Fresh fixed-load smoke measurements used 1200-byte payloads, two connections,
+2000 packets/s aggregate, and 10 seconds each for H3 and H2, sequentially.
+The new server was explicitly rebuilt from the reviewed source. An initial
+attempt accidentally used a stale baseline executable in target/release;
+its purported new-version results were discarded. The baseline row below is
+the successful baseline run; new rows use the verified rebuilt executable.
+
+| Server path | CPU seconds (MASQUE only) | Peak RSS bytes | H3 / H2 response shortfall |
+| --- | ---: | ---: | --- |
+| Baseline DIRECT | 3.413 | 29720576 | 0 / 0 |
+| Current DIRECT | 3.367 | 29687808 | 0 / 0 |
+| Current SOCKS5 + Hysteria2 | 2.575 | 29327360 | 0 / 1 of 20000 |
+
+These are single macOS loopback samples, not statistically controlled CPU
+comparisons. CPU accounting includes process startup/shutdown and excludes
+Hysteria client/server, kernel memory, and load generators. Lower MASQUE-only
+CPU on the proxy row is not evidence that the complete proxy path costs less.
+One H2 proxied packet expired; its cause was not isolated. This does not
+establish loss-free operation or replace a Linux load/soak test. Formatting
+and shell quick checks and git diff whitespace checks also passed. No runtime
+source or deployed configuration changed during this review.
+
+## DIRECT-only reload validation (2026-11-22)
+
+Implemented `reload-direct-cidrs` over the existing private local socket.
+Validated 14 outbound unit tests, including live TCP/UDP survival and retained
+setup snapshots, plus a separate evidence-ordering regression test. The real
+CLI/status integration verifies changed/unchanged/rejected outcomes, retaining
+old data after an invalid file, ignoring changed TOML/file-path settings, and
+leaving pending TLS/Basic updates unapplied. Removing the upstream password
+file does not prevent a DIRECT-only reload: startup credentials remain loaded.
+
+`scripts/check.sh full` passed (format/shell, Clippy, operations checks, MSRV
+and workspace tests). The evidence-ordering test was added afterward and passed
+separately; final all-target Clippy and whitespace checks also passed. Both
+real Hysteria2 H2/H3 interop tests passed again.
+
+Linux ARM64 release build and all 12 Docker E2E scenarios passed. The first
+attempt failed before traffic testing because an existing local test certificate
+could not be decoded; retry used freshly generated OpenSSL 3 test certificates
+mounted only into the isolated test container. Existing certificates were not
+changed. A separate Linux runtime-container test verified the command's
+unchanged/update/error rollback behavior and independence from a removed TOML
+file. Test containers and their Compose network were removed afterward.
+
+No production endpoint was accessed or deployed. No new per-packet lookup,
+lock, polling task or dependency was introduced. Each new TCP/UDP setup clones
+one route snapshot under a short read lock; old snapshots remain alive only
+while in-flight setups retain them. File loading/sorting is serialized on a
+blocking worker. This review does not quantify high-rate connection-setup lock
+contention or long-duration memory behavior under repeated reloads.

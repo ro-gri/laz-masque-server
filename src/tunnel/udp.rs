@@ -341,12 +341,14 @@ pub(crate) async fn connect_udp_target(
     outbound: &crate::outbound::Router,
 ) -> Result<ConnectedUdpTarget, TargetSetupFailure> {
     let deadline = tokio::time::Instant::now() + timeout;
+    let routes = outbound.snapshot();
     let resolved = resolve_allowed(&target.host, target.port, policy, deadline, resolver).await?;
     let mut last_error = None;
 
     for target_addr in resolved.into_addresses() {
-        outbound.record_attempt(true, target_addr.ip());
-        let opened = if outbound.route(target_addr.ip()) == crate::config::OutboundRoute::Socks5 {
+        let route = outbound.route_snapshot(&routes, target_addr.ip());
+        outbound.record_attempt(true, route);
+        let opened = if route == crate::config::OutboundRoute::Socks5 {
             match tokio::time::timeout_at(deadline, outbound.associate(target_addr)).await {
                 Err(_) => return Err(TargetSetupFailure::timeout("SOCKS5 UDP setup")),
                 Ok(Err(error)) => Err(error),

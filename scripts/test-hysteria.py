@@ -76,6 +76,7 @@ def main():
             env = dict(os.environ, MASQUE_TEST_HYSTERIA_SOCKS=f"127.0.0.1:{socks_port}")
             if args.benchmark:
                 env["MASQUE_BENCH_SOCKS5_ADDR"] = f"127.0.0.1:{socks_port}"
+                env["MASQUE_BENCH_SOCKS5_UDP_MAX_PACKET_SIZE"] = "4000"
                 subprocess.run(["bash", "scripts/network-bench.sh"], cwd=root, env=env, check=True, timeout=1800)
             else:
                 subprocess.run(["cargo", "test", *(["--release"] if args.release else []), "--locked", "--test", "http2_connect", "--test", "client_cert_connect_ip",

@@ -82,7 +82,7 @@ fn exercise(endpoint: SocketAddr, tcp_target: SocketAddr, udp_target: SocketAddr
     config.outbound.default_route = OutboundRoute::Socks5;
     config.outbound.socks5 = Some(Socks5Section {
         endpoint,
-        udp_max_packet_size: 4000,
+        udp_max_packet_size: if real { 4000 } else { 65_507 },
         ..Default::default()
     });
     let peer = spawn_server(config)[0];

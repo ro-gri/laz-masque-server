@@ -152,7 +152,7 @@ can require TUN creation at startup with `ip_proxy.require_tun = true`.
 | `src/scheduler.rs` | Dirty-connection scheduling and one replaceable deadline per connection |
 | `src/runtime_status.rs` | Private local socket and keyed loaded-configuration fingerprints |
 | `src/auth.rs` | Basic credential parsing and Argon2id verification |
-| `src/outbound/` | Shared immutable CIDR routing, bounded SOCKS5 setup, UDP framing/control lifetime |
+| `src/outbound/` | Shared snapshot-based CIDR routing, bounded SOCKS5 setup, UDP framing/control lifetime |
 | `src/policy.rs` | CIDR target allow/deny decisions |
 | `src/tun.rs` | Linux TUN creation and offloaded packet batches |
 | `src/address_pool.rs` | CONNECT-IP address allocation |
@@ -445,3 +445,14 @@ After the shared target ACL check, CONNECT and CONNECT-UDP select DIRECT or
 SOCKS5 per checked IP. Both HTTP transports share one immutable router and
 upstream capacity budgets. See [Outbound routing](outbound-routing.md) for
 ownership, framing and failure semantics. CONNECT-IP routing is independent.
+
+### DIRECT file control command
+
+The owner-only local status socket also accepts `reload-direct-cidrs`. It reads
+only the startup CIDR path on a single serialized blocking worker, prepares an
+immutable replacement, and updates outbound evidence with the range snapshot.
+One short RwLock acquisition clones an Arc at TCP/UDP setup; DNS and retries
+retain that snapshot. No packet path locks or file reads are added. SOCKS
+credentials, budgets and counters retain their original owners. TLS/credential
+reload commits merge only their own evidence sections so they cannot overwrite
+a newer DIRECT fingerprint. Failed preparation publishes nothing.

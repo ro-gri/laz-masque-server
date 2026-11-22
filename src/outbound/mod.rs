@@ -8,8 +8,8 @@ use std::fmt::Write as _;
 use std::io::{self, Read};
 use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 
 use anyhow::{Context, ensure};
 use ipnet::IpNet;
@@ -25,12 +25,25 @@ const MAX_CIDRS: usize = 100_000;
 
 pub(crate) struct Router {
     default: OutboundRoute,
-    v4: Vec<(u128, u128)>,
-    v6: Vec<(u128, u128)>,
+    ranges: RwLock<Arc<DirectRanges>>,
+    config: OutboundSection,
+    password_digest: [u8; 32],
     proxy: Option<Proxy>,
     attempts: [AtomicU64; 4],
-    /// Digest of exactly the external files used to construct this instance.
+}
+
+/// An immutable snapshot retained for the whole target setup, including retries.
+pub(crate) struct DirectRanges {
+    v4: Vec<(u128, u128)>,
+    v6: Vec<(u128, u128)>,
     pub(crate) files_digest: [u8; 32],
+}
+
+fn combined_digest(cidr: [u8; 32], password: [u8; 32]) -> [u8; 32] {
+    let mut digest = ring::digest::Context::new(&ring::digest::SHA256);
+    digest.update(&cidr);
+    digest.update(&password);
+    digest.finish().as_ref().try_into().unwrap()
 }
 
 struct Proxy {
@@ -45,8 +58,17 @@ struct Proxy {
 
 fn read_bounded(path: &Path, max: usize) -> anyhow::Result<Zeroizing<Vec<u8>>> {
     ensure!(path.is_absolute(), "outbound file paths must be absolute");
-    let file =
-        std::fs::File::open(path).map_err(|_| anyhow::anyhow!("cannot open outbound file"))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        // Reject a FIFO/device via metadata without blocking on its open.
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options
+        .open(path)
+        .map_err(|_| anyhow::anyhow!("cannot open outbound file"))?;
     ensure!(
         file.metadata()?.is_file(),
         "outbound input must be a regular file"
@@ -61,49 +83,8 @@ fn read_bounded(path: &Path, max: usize) -> anyhow::Result<Zeroizing<Vec<u8>>> {
 
 impl Router {
     pub(crate) fn load(config: &OutboundSection) -> anyhow::Result<Self> {
-        ensure!(
-            config.direct_cidrs.len() <= MAX_CIDRS,
-            "too many outbound CIDRs"
-        );
-        let mut cidrs = config.direct_cidrs.clone();
-        let mut digest = ring::digest::Context::new(&ring::digest::SHA256);
-        if let Some(path) = &config.direct_cidrs_file {
-            let bytes = read_bounded(path, MAX_CIDR_BYTES)?;
-            digest.update(&(bytes.len() as u64).to_be_bytes());
-            digest.update(&bytes);
-            let text = std::str::from_utf8(&bytes).context("outbound CIDR file must be UTF-8")?;
-            for line in text.lines() {
-                let line = line.split('#').next().unwrap().trim();
-                if !line.is_empty() {
-                    ensure!(cidrs.len() < MAX_CIDRS, "too many outbound CIDRs");
-                    cidrs.push(line.to_owned());
-                }
-            }
-            ensure!(!cidrs.is_empty(), "outbound CIDR file must not be empty");
-        }
-        let mut v4 = Vec::new();
-        let mut v6 = Vec::new();
-        for (index, cidr) in cidrs.iter().enumerate() {
-            let net: IpNet = cidr
-                .parse()
-                .map_err(|_| anyhow::anyhow!("invalid outbound CIDR at index {index}"))?;
-            match net {
-                IpNet::V4(net) => v4.push((
-                    u32::from(net.network()) as u128,
-                    u32::from(net.broadcast()) as u128,
-                )),
-                IpNet::V6(net) => {
-                    if net.prefix_len() >= 96
-                        && let Some(ip) = net.network().to_ipv4_mapped()
-                    {
-                        let start = u32::from(ip) as u128;
-                        v4.push((start, start + ((1u128 << (128 - net.prefix_len())) - 1)));
-                    } else {
-                        v6.push((u128::from(net.network()), u128::from(net.broadcast())));
-                    }
-                }
-            }
-        }
+        let (v4, v6, cidr_digest) = load_ranges(config)?;
+        let mut password_digest = [0; 32];
         let proxy = config
             .socks5
             .as_ref()
@@ -144,8 +125,10 @@ impl Router {
                             (1..=255).contains(&password.len()),
                             "SOCKS5 password must be 1..255 bytes"
                         );
-                        digest.update(&(password.len() as u64).to_be_bytes());
-                        digest.update(&password);
+                        password_digest = ring::digest::digest(&ring::digest::SHA256, &password)
+                            .as_ref()
+                            .try_into()
+                            .unwrap();
                         Some((username.clone(), password))
                     }
                     _ => anyhow::bail!(
@@ -170,17 +153,56 @@ impl Router {
         Ok(Self {
             default: config.default_route,
             attempts: std::array::from_fn(|_| AtomicU64::new(0)),
-            v4: merge(v4),
-            v6: merge(v6),
+            ranges: RwLock::new(Arc::new(DirectRanges {
+                v4: merge(v4),
+                v6: merge(v6),
+                files_digest: combined_digest(cidr_digest, password_digest),
+            })),
+            config: config.clone(),
+            password_digest,
             proxy,
-            files_digest: digest.finish().as_ref().try_into().unwrap(),
         })
     }
 
+    pub(crate) fn snapshot(&self) -> Arc<DirectRanges> {
+        Arc::clone(&self.ranges.read().expect("outbound ranges poisoned"))
+    }
+
+    pub(crate) fn files_digest(&self) -> [u8; 32] {
+        self.snapshot().files_digest
+    }
+
+    /// File I/O and sorting must run on a bounded blocking worker.
+    pub(crate) fn prepare_direct_reload(&self) -> anyhow::Result<Arc<DirectRanges>> {
+        ensure!(
+            self.config.direct_cidrs_file.is_some(),
+            "no direct_cidrs_file configured at startup"
+        );
+        let (v4, v6, digest) = load_ranges(&self.config)?;
+        Ok(Arc::new(DirectRanges {
+            v4: merge(v4),
+            v6: merge(v6),
+            files_digest: combined_digest(digest, self.password_digest),
+        }))
+    }
+
+    pub(crate) fn install_direct_ranges(&self, ranges: Arc<DirectRanges>) {
+        *self.ranges.write().expect("outbound ranges poisoned") = ranges;
+    }
+
+    pub(crate) fn config(&self) -> &OutboundSection {
+        &self.config
+    }
+
+    #[cfg(test)]
     pub(crate) fn route(&self, ip: IpAddr) -> OutboundRoute {
+        self.route_snapshot(&self.snapshot(), ip)
+    }
+
+    pub(crate) fn route_snapshot(&self, snapshot: &DirectRanges, ip: IpAddr) -> OutboundRoute {
         let (ranges, value) = match ip.to_canonical() {
-            IpAddr::V4(ip) => (&self.v4, u32::from(ip) as u128),
-            IpAddr::V6(ip) => (&self.v6, u128::from(ip)),
+            IpAddr::V4(ip) => (&snapshot.v4, u32::from(ip) as u128),
+            IpAddr::V6(ip) => (&snapshot.v6, u128::from(ip)),
         };
         let i = ranges.partition_point(|(start, _)| *start <= value);
         if i > 0 && value <= ranges[i - 1].1 {
@@ -190,8 +212,8 @@ impl Router {
         }
     }
 
-    pub(crate) fn record_attempt(&self, udp: bool, ip: IpAddr) {
-        let index = usize::from(udp) * 2 + usize::from(self.route(ip) == OutboundRoute::Socks5);
+    pub(crate) fn record_attempt(&self, udp: bool, route: OutboundRoute) {
+        let index = usize::from(udp) * 2 + usize::from(route == OutboundRoute::Socks5);
         self.attempts[index].fetch_add(1, Ordering::Relaxed);
     }
 
@@ -239,9 +261,20 @@ impl Router {
         }
     }
 
+    #[cfg(test)]
     pub(crate) async fn connect_tcp(&self, target: SocketAddr) -> io::Result<TcpStream> {
-        self.record_attempt(false, target.ip());
-        if self.route(target.ip()) == OutboundRoute::Direct {
+        let snapshot = self.snapshot();
+        self.connect_tcp_snapshot(target, &snapshot).await
+    }
+
+    pub(crate) async fn connect_tcp_snapshot(
+        &self,
+        target: SocketAddr,
+        snapshot: &DirectRanges,
+    ) -> io::Result<TcpStream> {
+        let route = self.route_snapshot(snapshot, target.ip());
+        self.record_attempt(false, route);
+        if route == OutboundRoute::Direct {
             return TcpStream::connect(target).await;
         }
         let proxy = self.proxy.as_ref().expect("validated SOCKS5 route");
@@ -264,6 +297,57 @@ impl Router {
         let _slot = proxy.connecting.acquire().await.map_err(io::Error::other)?;
         socks5::associate(proxy, target, active).await
     }
+}
+
+#[allow(clippy::type_complexity)]
+fn load_ranges(
+    config: &OutboundSection,
+) -> anyhow::Result<(Vec<(u128, u128)>, Vec<(u128, u128)>, [u8; 32])> {
+    ensure!(
+        config.direct_cidrs.len() <= MAX_CIDRS,
+        "too many outbound CIDRs"
+    );
+    let mut cidrs = config.direct_cidrs.clone();
+    let mut digest = ring::digest::Context::new(&ring::digest::SHA256);
+    if let Some(path) = &config.direct_cidrs_file {
+        let bytes = read_bounded(path, MAX_CIDR_BYTES)?;
+        digest.update(&(bytes.len() as u64).to_be_bytes());
+        digest.update(&bytes);
+        let text = std::str::from_utf8(&bytes).context("outbound CIDR file must be UTF-8")?;
+        for line in text.lines() {
+            let line = line.split('#').next().unwrap().trim();
+            if !line.is_empty() {
+                ensure!(cidrs.len() < MAX_CIDRS, "too many outbound CIDRs");
+                cidrs.push(line.to_owned());
+            }
+        }
+        ensure!(!cidrs.is_empty(), "outbound CIDR file must not be empty");
+    }
+    let mut v4 = Vec::new();
+    let mut v6 = Vec::new();
+    for (index, cidr) in cidrs.iter().enumerate() {
+        let net: IpNet = cidr
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid outbound CIDR at index {index}"))?;
+        match net {
+            IpNet::V4(net) => v4.push((
+                u32::from(net.network()) as u128,
+                u32::from(net.broadcast()) as u128,
+            )),
+            IpNet::V6(net) => {
+                if net.prefix_len() >= 96
+                    && let Some(ip) = net.network().to_ipv4_mapped()
+                {
+                    let start = u32::from(ip) as u128;
+                    v4.push((start, start + ((1u128 << (128 - net.prefix_len())) - 1)));
+                } else {
+                    v6.push((u128::from(net.network()), u128::from(net.broadcast())));
+                }
+            }
+        }
+    }
+
+    Ok((v4, v6, digest.finish().as_ref().try_into().unwrap()))
 }
 
 fn merge(mut ranges: Vec<(u128, u128)>) -> Vec<(u128, u128)> {

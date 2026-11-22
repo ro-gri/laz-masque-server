@@ -1119,4 +1119,6 @@ fields currently have backward-compatible defaults.
 CONNECT and CONNECT-UDP can select DIRECT or a local SOCKS5 upstream by IP/CIDR.
 See [Outbound routing](outbound-routing.md) for configuration, DNS semantics,
 limits and Hysteria2 compatibility. The default remains DIRECT; changes require
-restart, including external CIDR or upstream-password file changes.
+restart, except CIDR file contents: `reload-direct-cidrs` applies those alone
+through the owner-only local socket. Upstream-password changes still require
+a restart. See the routing guide for command results and snapshot semantics.

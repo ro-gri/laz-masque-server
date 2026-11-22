@@ -577,6 +577,7 @@ pub(crate) async fn resolve_and_connect(
     outbound: Arc<crate::outbound::Router>,
 ) -> Result<(TcpStream, SocketAddr), TcpSetupFailure> {
     let deadline = tokio::time::Instant::now() + timeout;
+    let routes = outbound.snapshot();
     let resolved = resolve_allowed(&target.host, target.port, policy, deadline, resolver).await?;
     let connected = tokio::time::timeout_at(
         deadline,
@@ -585,7 +586,8 @@ pub(crate) async fn resolve_and_connect(
             HAPPY_EYEBALLS_DELAY,
             move |address| {
                 let outbound = Arc::clone(&outbound);
-                async move { outbound.connect_tcp(address).await }
+                let routes = Arc::clone(&routes);
+                async move { outbound.connect_tcp_snapshot(address, &routes).await }
             },
         ),
     )

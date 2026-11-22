@@ -1141,6 +1141,7 @@ fn status_compares_running_config_and_successful_reload_without_exposing_values(
         .connect(&socket2::SockAddr::unix(&socket).unwrap())
         .unwrap();
     let mut stream = std::os::unix::net::UnixStream::from(stream);
+    std::io::Write::write_all(&mut stream, b"S").unwrap();
     stream.read_to_string(&mut raw).unwrap();
     assert!(!raw.contains(&cfg.listeners[0].auth.username));
     assert!(!raw.contains(&cfg.listeners[0].auth.password_hash));
@@ -1162,6 +1163,51 @@ fn status_compares_running_config_and_successful_reload_without_exposing_values(
         "basic_credentials: reload required",
         "tls_identity: reload required",
     ]);
+    let reload_direct = || {
+        Command::new(env!("CARGO_BIN_EXE_masque-server"))
+            .args([
+                "--status-socket",
+                socket.to_str().unwrap(),
+                "reload-direct-cidrs",
+            ])
+            .output()
+            .unwrap()
+    };
+    let reloaded = reload_direct();
+    assert!(
+        reloaded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reloaded.stderr)
+    );
+    assert!(String::from_utf8_lossy(&reloaded.stdout).contains("updated"));
+    wait_for(&[
+        "outbound: applied",
+        "basic_credentials: reload required",
+        "tls_identity: reload required",
+    ]);
+    // The control command must not parse changed TOML or adopt a new file path.
+    std::fs::write(&path, "invalid TOML sentinel").unwrap();
+    let unchanged = reload_direct();
+    assert!(unchanged.status.success());
+    assert!(String::from_utf8_lossy(&unchanged.stdout).contains("unchanged"));
+    write_config(&cfg);
+    let original_path = cfg.outbound.direct_cidrs_file.clone();
+    cfg.outbound.direct_cidrs_file = Some(dir.path().join("does-not-exist"));
+    write_config(&cfg);
+    assert!(reload_direct().status.success());
+    cfg.outbound.direct_cidrs_file = original_path;
+    write_config(&cfg);
+    std::fs::write(&routes, "not-a-CIDR sentinel").unwrap();
+    let rejected = reload_direct();
+    assert!(!rejected.status.success());
+    assert!(!String::from_utf8_lossy(&rejected.stderr).contains("sentinel"));
+    std::fs::write(&routes, "203.0.113.0/24\n").unwrap();
+    assert!(String::from_utf8_lossy(&reload_direct().stdout).contains("unchanged"));
+    wait_for(&[
+        "outbound: applied",
+        "basic_credentials: reload required",
+        "tls_identity: reload required",
+    ]);
     let signal = || {
         assert!(
             Command::new("kill")
@@ -1173,7 +1219,7 @@ fn status_compares_running_config_and_successful_reload_without_exposing_values(
     };
     signal();
     wait_for(&[
-        "outbound: restart required",
+        "outbound: applied",
         "udp_proxy: restart required",
         "basic_credentials: applied",
         "tls_identity: applied",

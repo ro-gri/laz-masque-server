@@ -1,10 +1,24 @@
 # IP/CIDR outbound routing
 
 CONNECT and CONNECT-UDP can use DIRECT or a local SOCKS5 upstream on both
-HTTP/2 and HTTP/3. Hysteria2 remains a separately managed process. No TUN,
+HTTP/2 and HTTP/3. The SOCKS5 provider remains a separately managed process. No TUN,
 packet routing, transparent interception or Linux privileges are needed.
 CONNECT-IP is independent and does not use these rules. Check the client uses
 CONNECT/CONNECT-UDP before expecting this feature to route its traffic.
+
+## Upstream-independent contract
+
+The adapter must not detect a provider or change TCP/UDP semantics for one.
+It preserves TCP half-close and empty UDP datagrams. Provider-specific limits
+are explicit deployment overrides, not generic defaults. Hysteria2 is one
+interop target, not a runtime dependency or the definition of SOCKS5 behavior.
+
+Current scope is local SOCKS5 CONNECT and UDP ASSOCIATE with IP destinations,
+no-auth or username/password authentication. It is not every SOCKS5 feature:
+remote endpoints, a UDP relay on a different IP, domain-valued UDP relay
+addresses, GSSAPI, BIND and SOCKS fragmentation are not supported. Providers
+must satisfy this contract; a product name alone does not prove compatibility.
+The local-only scope follows the separate-client topology used by this feature.
 
 ## Configuration
 
@@ -24,7 +38,7 @@ direct_cidrs = []
 endpoint = "127.0.0.1:1080"
 max_connecting = 128
 max_udp_associations = 1024
-udp_max_packet_size = 4000 # Conservative Hysteria2 packet budget, including header
+udp_max_packet_size = 65507 # Generic complete SOCKS5 UDP packet budget
 # Optional RFC 1929 authentication; specify both fields together.
 # username = "masque"
 # password_file = "/etc/masque-server/socks5-password"
@@ -48,11 +62,41 @@ version/date and checksum. Country attribution describes that dataset, not a
 guarantee about the physical location or ownership of every service. Include
 both address families. Inspect updates before atomically replacing the file.
 
-Route, upstream and file-content changes require a restart. `status` reports
-`outbound: restart required`, including when the file path has not changed.
-SIGHUP only reloads the existing supported credential/TLS state; it never
-silently switches live tunnel routes. A running server retains its immutable
-startup snapshot if a file is replaced or removed.
+Route defaults, inline CIDRs, upstream settings, password files and the CIDR
+file path require a restart. Only the contents of the startup CIDR file can
+be updated without restarting:
+
+```sh
+masque-server --status-socket /run/masque/status.sock reload-direct-cidrs
+```
+
+The default socket path is `/run/masque/status.sock`; omit the option when using
+that default. Run as the service user or root. The existing local socket must
+be available (0700 parent directory, 0600 socket). The command takes no file
+argument and does not read the CLI configuration file: it always uses the path
+and inline prefixes captured by the running process at startup. It does not
+reload TLS, users, passwords, routing defaults or any other TOML setting.
+
+The command returns `DIRECT CIDRs updated` or `DIRECT CIDRs unchanged` with
+exit status zero. Validation or connection failures return nonzero. A response
+timeout has an unknown outcome: repeat the idempotent command rather than
+assuming that it did not apply. Unchanged means identical file bytes; a comment
+or whitespace change also counts as an update.
+
+Publish a complete file by atomic rename, then run the command. One bounded
+blocking worker reads and validates a candidate; malformed, missing or oversized
+files leave the previous ranges and status evidence intact. No automatic file
+watcher or downloader runs. Concurrent control requests are serialized. Existing
+TCP/UDP tunnels keep their established route. Setups already in progress retain
+one snapshot for all DNS candidates/retries; later setups use the new snapshot.
+CIDR lookup and snapshot locking never occur on the per-packet forwarding path.
+
+`status` reports the new file as applied after success. Before this command,
+changed file contents still appear under `outbound: restart required`; that
+section also includes settings that genuinely need a restart. `SIGHUP` does
+not update DIRECT ranges. A failed or unapplied file replacement does not change
+running routing decisions. The local socket protocol is private; use a matching
+CLI/server build (status request byte `S`, DIRECT reload request byte `R`).
 
 ## Selection and failure semantics
 
@@ -130,6 +174,9 @@ Metrics have only fixed route/protocol labels:
 
 ## Hysteria2 compatibility
 
+Only for this provider, override `[outbound.socks5]` with
+`udp_max_packet_size = 4000`; do not copy that limit to unrelated providers.
+
 Configure the separately managed client with a loopback SOCKS listener and
 UDP enabled (`disableUDP: false`). Use `fastOpen: false`: otherwise a successful
 SOCKS CONNECT can precede the remote connection result. Keep certificate
@@ -186,6 +233,8 @@ HYSTERIA_BIN=/absolute/path/to/hysteria python3 scripts/test-hysteria.py --bench
 Run `scripts/network-bench.sh` with the same load variables for DIRECT.
 `MASQUE_BENCH_SOCKS5_ADDR` also selects an already-running loopback upstream;
 the benchmark validates that endpoint and adds only its temporary configuration.
+Its generic UDP budget is 65507; `MASQUE_BENCH_SOCKS5_UDP_MAX_PACKET_SIZE`
+can explicitly override it. The Hysteria runner alone selects 4000.
 
 See the [validation record](outbound-validation.md) for executed checks,
 measured local load results and remaining release gates.

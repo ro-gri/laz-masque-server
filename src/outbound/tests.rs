@@ -214,7 +214,7 @@ fn file_snapshots_are_immutable_and_changes_have_distinct_fingerprints() {
     let loaded = Router::load(&c).unwrap();
     std::fs::write(&file.0, b"203.0.113.0/24\n").unwrap();
     let changed = Router::load(&c).unwrap();
-    assert_ne!(loaded.files_digest, changed.files_digest);
+    assert_ne!(loaded.files_digest(), changed.files_digest());
     assert_eq!(
         loaded.route("192.0.2.1".parse().unwrap()),
         OutboundRoute::Direct
@@ -365,5 +365,92 @@ async fn packet_budget_drops_oversize_without_corrupting_next_datagram() {
     assert_eq!(
         association.decode(&response[..len]),
         Some(&b"still usable"[..])
+    );
+}
+
+#[tokio::test]
+async fn direct_reload_pins_existing_tcp_udp_and_pending_setup_snapshots() {
+    let proxy = mock::MockSocks::start().await;
+    let file = TempFile::new(b"192.0.2.0/24\n");
+    let mut c = config(proxy.addr);
+    c.direct_cidrs_file = Some(file.0.clone());
+    let router = Router::load(&c).unwrap();
+    let direct = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let target = direct.local_addr().unwrap();
+    let old = router.snapshot();
+    let mut existing = router.connect_tcp(target).await.unwrap();
+    let (udp, association) = router.associate(target).await.unwrap();
+    let udp = UdpSocket::from_std(udp).unwrap();
+    std::fs::write(&file.0, "127.0.0.0/8\n2001:db9::/32\n").unwrap();
+    router.install_direct_ranges(router.prepare_direct_reload().unwrap());
+    assert_eq!(router.route(target.ip()), OutboundRoute::Direct);
+    assert_eq!(
+        router.route("2001:db9::1".parse().unwrap()),
+        OutboundRoute::Direct
+    );
+    assert_eq!(
+        router.route_snapshot(&old, target.ip()),
+        OutboundRoute::Socks5
+    );
+    // Inline startup prefixes remain present.
+    assert_eq!(
+        router.route("2001:db8::1".parse().unwrap()),
+        OutboundRoute::Direct
+    );
+    let mut pending = router.connect_tcp_snapshot(target, &old).await.unwrap();
+    for stream in [&mut existing, &mut pending] {
+        stream.write_all(b"old").await.unwrap();
+        let mut bytes = [0; 3];
+        tokio::time::timeout(Duration::from_secs(2), stream.read_exact(&mut bytes))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&bytes, b"old");
+    }
+    let mut wire = Vec::new();
+    association.encode(b"old UDP", &mut wire);
+    udp.send(&wire).await.unwrap();
+    let mut bytes = [0; 128];
+    let n = tokio::time::timeout(Duration::from_secs(2), udp.recv(&mut bytes))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(association.decode(&bytes[..n]), Some(&b"old UDP"[..]));
+    let _new = router.connect_tcp(target).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), direct.accept())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(proxy.requests.lock().unwrap().len(), 3);
+    let digest = router.files_digest();
+    std::fs::write(&file.0, "invalid").unwrap();
+    assert!(router.prepare_direct_reload().is_err());
+    assert_eq!(router.files_digest(), digest);
+    assert_eq!(router.route(target.ip()), OutboundRoute::Direct);
+}
+
+#[test]
+fn direct_reload_does_not_read_password_and_rejects_missing_file() {
+    let password = TempFile::new(b"original-secret");
+    let file = TempFile::new(b"192.0.2.0/24\n");
+    let mut c = config("127.0.0.1:1080".parse().unwrap());
+    c.direct_cidrs_file = Some(file.0.clone());
+    c.socks5.as_mut().unwrap().username = Some("test".into());
+    c.socks5.as_mut().unwrap().password_file = Some(password.0.clone());
+    let router = Router::load(&c).unwrap();
+    std::fs::remove_file(&password.0).unwrap();
+    std::fs::write(&file.0, "203.0.113.0/24\n").unwrap();
+    router.install_direct_ranges(router.prepare_direct_reload().unwrap());
+    assert_eq!(
+        router.route("203.0.113.1".parse().unwrap()),
+        OutboundRoute::Direct
+    );
+    std::fs::remove_file(&file.0).unwrap();
+    assert!(router.prepare_direct_reload().is_err());
+    assert!(
+        Router::load(&OutboundSection::default())
+            .unwrap()
+            .prepare_direct_reload()
+            .is_err()
     );
 }
