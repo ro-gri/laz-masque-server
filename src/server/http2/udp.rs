@@ -107,6 +107,25 @@ pub(super) async fn serve(
     };
 
     let target_to_client = async {
+        #[cfg(target_os = "linux")]
+        if let Some((mut batch, receiver, association)) = socket.socks5_receiver(max_payload) {
+            loop {
+                let received = batch.recv(receiver).await?;
+                let mut capsules = Vec::new();
+                for payload in batch.payloads(association, received) {
+                    encoder::encode_datagram_context_zero(payload, &mut capsules);
+                    if capsules.len() >= RESPONSE_BATCH_BYTES {
+                        activity.touch();
+                        send_data(&mut send, Bytes::from(std::mem::take(&mut capsules)), false)
+                            .await?;
+                    }
+                }
+                if !capsules.is_empty() {
+                    activity.touch();
+                    send_data(&mut send, Bytes::from(capsules), false).await?;
+                }
+            }
+        }
         // One extra byte detects a datagram larger than the configured limit;
         // never forward a silently truncated prefix.
         let mut recv = vec![0_u8; socket.recv_buffer_size(max_payload)];

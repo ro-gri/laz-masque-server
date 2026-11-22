@@ -14,6 +14,9 @@ pre-1.0.
 
 ### Added
 
+- Batch SOCKS5 UDP replies with Linux `recvmmsg` on H2/H3, retaining portable
+  single-packet receive on other platforms and bounded per-tunnel storage.
+
 - Add `reload-direct-cidrs` over the private local control socket to apply only
   the startup DIRECT CIDR file without restarting or changing active tunnels.
   Reject invalid files atomically and retain setup snapshots across DNS retries.

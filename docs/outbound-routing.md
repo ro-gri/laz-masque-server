@@ -157,20 +157,43 @@ resolver, early-data and response-queue budgets also remain in force.
 HTTP/3 sends remain nonblocking. SOCKS headers are added to bounded staging
 buffers before existing sends; no extra unbounded sender queue is introduced.
 DIRECT preserves its batched receive/send and optional GSO path. SOCKS5 uses
-portable asynchronous receive plus existing response queues and disables target
-GSO. HTTP/2 preserves capsule framing and flow control. It does not encapsulate
+bounded Linux `recvmmsg` receive batches on both H2 and H3,
+with the existing single-datagram asynchronous path on other operating systems.
+It still disables target GSO. HTTP/2 preserves capsule framing and flow
+control. It does not encapsulate
 SOCKS headers into MASQUE payloads.
 
-SOCKS5 receive buffers use `min(client_payload_limit + 22,
-udp_max_packet_size) + 1` bytes on all supported platforms. The 22-byte
+Portable single-packet SOCKS5 receive buffers use `min(client_payload_limit + 22,
+udp_max_packet_size) + 1` bytes. Linux batch slots use the same size bound. The 22-byte
 allowance accepts either IP header, including IPv4-mapped IPv6 responses;
 the extra byte detects truncated packets, which are discarded. Full upstream
 packet and decoded payload limits still apply. At a 4000-byte upstream limit,
-H2 and H3 capsule reception allocate 4001 bytes instead of 65550 bytes per
+Portable H2 and H3 capsule reception allocate 4001 bytes instead of 65550 bytes per
 tunnel (about 15.03 MiB less buffer storage across 256 tunnels). This is an
 allocation bound, not a guaranteed RSS reduction. Native H3 already uses a
 smaller transport bound. DIRECT allocation and the generic 65507-byte SOCKS5
 default are unchanged; no Hysteria-specific limit is inferred.
+
+Linux SOCKS receive storage starts with at most two slots and doubles after a
+full read, up to 16 slots within a 32 KiB payload-buffer
+budget, except that one permitted large datagram always fits. Slot size is the
+smaller of the upstream packet budget and the client payload limit plus the
+largest SOCKS IP header, with one sentinel byte. This avoids allocating sixteen
+64 KiB buffers for capsule transports. With the generic 65507-byte upstream
+budget, a large capsule transport deliberately uses one slot; smaller explicit
+budgets allow several slots. Native H3 may retain more receive memory
+than the previous single-buffer path; the validation record quantifies it.
+
+Growth occurs before the next read, after all borrowed packet slices are
+consumed; buffers never shrink during the tunnel lifetime. DIRECT allocation
+is unchanged. Reads never wait for a full batch. Every packet independently passes kernel
+truncation, SOCKS reserved/fragment/address/port and payload-size checks. Empty
+UDP payloads remain valid. Decoding borrows the packet payload without moving
+it to remove the header; MASQUE output framing still copies payload bytes.
+One H3 queue item carries a bounded batch (as on native DIRECT); the channel
+remains 256 items, so native SOCKS can now queue up to 16 packets per item.
+H2 retains its capsule byte threshold and flow control. Control-channel closure
+is still monitored while batch delivery waits for capacity.
 
 Incoming UDP checks both the connected outer relay and the pinned target
 IP/port in the SOCKS header. Malformed RSV/ATYP, FRAG != 0, wrong target and

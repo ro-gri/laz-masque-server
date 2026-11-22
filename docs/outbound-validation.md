@@ -861,3 +861,77 @@ or installed as a persistent service. Raw results and build/test logs are in
 ignored `work/awg-validation/memory-results/` and `build-memory.log`.
 The test service was restored, temporary network removed, and original/new
 binaries and all build caches retained.
+
+## Linux SOCKS5 receive batching (2026-11-22)
+
+Implemented Linux `recvmmsg` reception for SOCKS5 UDP responses in both HTTP
+transports, retaining the existing single-packet non-Linux path. Buffers start
+at two slots and grow after a full read, up to 16 slots within a 32 KiB payload
+storage budget. One full-size packet is always permitted even above that
+budget; with the generic 65507-byte upstream limit, large-capsule reception
+therefore retains one slot. No timer waits to fill a batch. Each frame is
+validated independently before forwarding. Output framing still copies data.
+H3's bounded response channel may now retain multiple packets per item;
+this optimization does not guarantee lower memory under queued bursts.
+
+Validation passed:
+
+- macOS `scripts/check.sh full`, including portable H2/H3 burst regressions.
+- Linux ARM64/MSRV 1.88 release build and 497 library tests, including actual
+  socket batching, truncation, malformed frames, empty packets, packet
+  boundaries, buffer growth and bounded allocation.
+- Three focused Linux SOCKS5 H2/H3 integration tests and both real Hysteria2
+  v2.14.0 H2/H3 interoperability tests, with 32-packet burst coverage.
+- All 12 isolated Docker E2E scenarios.
+
+Linux Clippy could not run: the offline test image lacks the Clippy component
+for Rust 1.88. macOS all-target Clippy passed as part of the full check.
+No production endpoint was accessed or changed.
+
+### Before/after resource measurements
+
+Compared the exact local pre-batching source snapshot (including the earlier
+DIRECT-only reload work) against the adaptive implementation. Linux ARM64
+release binary SHA-256:
+
+- Before: `a80c43228945b7deb50722fa66e1475f5003585333d5a047d9003f4e97a73aa4`
+- After: `a1702021f2283020929ade90a8091945664cbb2783dc15db1d5d7d59bb02d4a2`
+
+Docker Desktop Linux, 10 available logical CPUs, no CPU quota or affinity,
+loopback real Hysteria2, one MASQUE shard, SOCKS5 packet limit 4000 bytes,
+window 64, expiry 1000 ms, target and QUIC GSO disabled. Each sample runs H3
+then H2 sequentially. CPU seconds and peak RSS measure only the MASQUE server
+process, including startup/shutdown; they exclude Hysteria, generators and
+kernel socket memory. Each row is a median of three samples per version,
+alternating version order between repetitions. The host was not isolated from
+other workloads; these short runs do not establish statistical significance.
+
+| Workload | CPU seconds before → after | Peak RSS MiB before → after |
+| --- | ---: | ---: |
+| 8 tunnels, 64 B, 8000 packets/s, 8 s per transport | 6.483 → 6.555 | 30.33 → 30.64 |
+| 8 tunnels, 1200 B, 8000 packets/s, 8 s per transport | 6.761 → 6.928 | 30.63 → 30.66 |
+| 256 tunnels, 64 B, 2560 packets/s, 8 s per transport | 4.279 → 3.935 | 37.96 → 37.00 |
+| 2 tunnels, 1200 B, unlimited rate, 5 s per transport | 8.980 → 8.920 | 30.39 → 30.58 |
+
+Throughput, response shortfall and latency are medians independently:
+
+| Workload | H3 packets/s before → after | H2 packets/s before → after | H3 shortfall % before → after | H2 shortfall % before → after | H3 p95 µs before → after | H2 p95 µs before → after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 64 B | 8000 → 8000 | 7999 → 7999 | 0 → 0 | 0 → 0 | 768 → 800 | 928 → 864 |
+| 1200 B | 8000 → 8000 | 8000 → 7998 | 0.0016 → 0 | 0.0031 → 0.0016 | 864 → 864 | 1088 → 1152 |
+| 256 tunnels | 2560 → 2560 | 2391 → 2390 | 0 → 0 | 6.6016 → 6.6455 | 3072 → 3200 | 10752 → 10752 |
+| Unlimited | 57105 → 56928 | 61809 → 60789 | 0.0750 → 0.0784 | 0.0673 → 0.0777 | 2560 → 2432 | 2304 → 2432 |
+
+The 256-tunnel H2 loss is present in both versions; its cause was not isolated.
+One baseline attempt timed out during preflight before producing load results;
+it was retained as a failed log and rerun, and is excluded from the 24 successful
+samples. An earlier eager-allocation experiment added roughly 10 MiB at 256
+tunnels and was rejected in favor of adaptive allocation; its results are not
+mixed into this table. Raw local logs, runner and JSON remain in ignored `work/`.
+
+Normal-load CPU did not improve (observed medians +1.1% and +2.5%); unlimited
+throughput also did not improve. The many-tunnel sample used about 8% less CPU
+and 0.96 MiB less RSS, but this is not a general performance guarantee. The
+change enables syscall amortization when packets are already queued; these
+measurements do not prove an overall CPU reduction, total gateway memory
+reduction or long-soak stability. No real iOS device test was performed here.

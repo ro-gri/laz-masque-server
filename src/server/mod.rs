@@ -56,8 +56,6 @@ use crate::metrics::{Metrics, ShardMetrics};
 use crate::net::quic::{
     MAX_BATCH_PACKETS, MAX_DATAGRAM_SIZE, QuicUdpSocket, RecvPacketBatch, SendPacketBatch,
 };
-#[cfg(target_os = "linux")]
-use crate::net::target_udp;
 use crate::net::target_udp::TargetRecvBatch;
 use crate::net::timer::DeadlineTimer;
 use crate::observability::ObservabilityServer;
@@ -1416,25 +1414,7 @@ async fn recv_target_batch(
     socket: &UdpSocket,
     batch: &mut TargetRecvBatch,
 ) -> std::io::Result<usize> {
-    #[cfg(target_os = "linux")]
-    {
-        use std::os::fd::AsRawFd;
-        use tokio::io::Interest;
-
-        // Like Tokio's recv(), observe error-only readiness as well. A
-        // connected UDP socket can receive ICMP without readable payload.
-        socket
-            .async_io(Interest::READABLE | Interest::ERROR, || {
-                target_udp::recv_mmsg(socket.as_raw_fd(), batch)
-            })
-            .await
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let len = socket.recv(batch.first_mut()).await?;
-        batch.set_single(len);
-        Ok(1)
-    }
+    crate::net::target_udp::recv_batch(socket, batch).await
 }
 
 /// A QUIC packet that arrived on the wrong shard's socket.

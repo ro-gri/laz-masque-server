@@ -465,3 +465,16 @@ TCP/UDP survival, failed file validation, and retention of startup credentials.
 credential reload. `cargo test --test check_config status_compares` exercises
 the real CLI/socket command, unchanged/error results, startup-path pinning,
 independence from malformed TOML, and unchanged pending TLS/Basic edits.
+
+### Linux SOCKS5 receive batches
+
+`cargo test --lib linux_socks_batch` requires Linux and covers per-packet
+validation within one burst (empty, mapped IPv4, wrong target, reserved fields,
+fragmentation, short headers, transport oversize, kernel truncation), batch
+reuse, and prompt delivery of a single ready packet. `cargo test --lib
+framed_receive_budget` checks adaptive allocation and the large-packet exception.
+H2/H3 SOCKS integration tests include 32-datagram bursts; run them on Linux
+for the fast path and macOS for the portable path. Run the real Hysteria tests
+and the standard Linux E2E suite as well. Compare binaries built from the exact
+before/after sources with one toolchain; include fixed-rate, many-tunnel and
+saturation measurements, and report memory as well as CPU and loss.

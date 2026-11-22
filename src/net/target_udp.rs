@@ -157,6 +157,8 @@ pub struct TargetRecvBatch {
     lengths: Vec<usize>,
     max_datagram_size: usize,
     #[cfg(target_os = "linux")]
+    max_slots: usize,
+    #[cfg(target_os = "linux")]
     truncated: Vec<bool>,
 }
 
@@ -168,20 +170,50 @@ impl TargetRecvBatch {
     /// makes oversized datagrams detectable even where the portable `recv` API
     /// does not expose `MSG_TRUNC`.
     pub fn new(max_datagram_size: usize) -> Self {
+        Self::with_capacity(max_datagram_size, TARGET_BATCH_SIZE)
+    }
+
+    /// Bounded packet storage for framed upstreams. A single large packet may
+    /// exceed the budget; batching must never shrink the permitted packet size.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn with_byte_budget(max_datagram_size: usize, budget: usize) -> Self {
+        let slots =
+            (budget / max_datagram_size.max(1).saturating_add(1)).clamp(1, TARGET_BATCH_SIZE);
+        let mut batch = Self::with_capacity(max_datagram_size, slots.min(2));
+        batch.max_slots = slots;
+        batch
+    }
+
+    /// Grow only after a full read, after the caller has consumed its slices.
+    /// Low-rate tunnels retain two slots instead of preallocating the maximum.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn grow_if_full(&mut self, received: usize) {
+        if received == self.buffers.len() && received < self.max_slots {
+            let slots = (received * 2).min(self.max_slots);
+            self.buffers
+                .resize_with(slots, || vec![0; self.max_datagram_size + 1]);
+            self.lengths.resize(slots, 0);
+            self.truncated.resize(slots, false);
+        }
+    }
+
+    fn with_capacity(max_datagram_size: usize, slots: usize) -> Self {
         let max_datagram_size = max_datagram_size.max(1);
         let buffer_size = max_datagram_size.saturating_add(1);
         Self {
-            buffers: vec![vec![0; buffer_size]; TARGET_BATCH_SIZE],
-            lengths: vec![0; TARGET_BATCH_SIZE],
+            buffers: vec![vec![0; buffer_size]; slots],
+            lengths: vec![0; slots],
             max_datagram_size,
             #[cfg(target_os = "linux")]
-            truncated: vec![false; TARGET_BATCH_SIZE],
+            max_slots: slots,
+            #[cfg(target_os = "linux")]
+            truncated: vec![false; slots],
         }
     }
 
     /// The datagrams from the last read, oversized ones already dropped.
     pub fn datagrams(&self, count: usize) -> impl Iterator<Item = &[u8]> {
-        let count = count.min(TARGET_BATCH_SIZE);
+        let count = count.min(self.buffers.len());
         (0..count)
             .filter(move |index| self.is_deliverable(*index))
             .map(move |index| &self.buffers[index][..self.lengths[index]])
@@ -238,7 +270,8 @@ pub fn recv_mmsg(fd: std::os::fd::RawFd, batch: &mut TargetRecvBatch) -> std::io
     // SAFETY: See above; every submitted header is filled in below.
     let mut headers: [libc::mmsghdr; TARGET_BATCH_SIZE] = unsafe { std::mem::zeroed() };
 
-    for index in 0..TARGET_BATCH_SIZE {
+    let slots = batch.buffers.len();
+    for index in 0..slots {
         batch.lengths[index] = 0;
         batch.truncated[index] = false;
         iovecs[index] = libc::iovec {
@@ -259,7 +292,7 @@ pub fn recv_mmsg(fd: std::os::fd::RawFd, batch: &mut TargetRecvBatch) -> std::io
             libc::SYS_recvmmsg,
             fd as libc::c_long,
             headers.as_mut_ptr() as usize as libc::c_long,
-            TARGET_BATCH_SIZE as libc::c_long,
+            slots as libc::c_long,
             libc::MSG_DONTWAIT as libc::c_long,
             0_i64,
         )
@@ -268,7 +301,7 @@ pub fn recv_mmsg(fd: std::os::fd::RawFd, batch: &mut TargetRecvBatch) -> std::io
         return Err(std::io::Error::last_os_error());
     }
 
-    let received = (result as usize).min(TARGET_BATCH_SIZE);
+    let received = (result as usize).min(slots);
     for (index, header) in headers.iter().take(received).enumerate() {
         batch.lengths[index] = (header.msg_len as usize).min(batch.buffers[index].len());
         batch.truncated[index] = header.msg_hdr.msg_flags & libc::MSG_TRUNC != 0;
@@ -406,9 +439,54 @@ pub fn send_mmsg(
         .sum())
 }
 
+/// Wait for readable/error readiness, then drain only already available packets.
+pub(crate) async fn recv_batch(
+    socket: &tokio::net::UdpSocket,
+    batch: &mut TargetRecvBatch,
+) -> std::io::Result<usize> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        use tokio::io::Interest;
+
+        // Like Tokio's recv(), observe error-only readiness as well. A
+        // connected UDP socket can receive ICMP without readable payload.
+        socket
+            .async_io(Interest::READABLE | Interest::ERROR, || {
+                recv_mmsg(socket.as_raw_fd(), batch)
+            })
+            .await
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let len = socket.recv(batch.first_mut()).await?;
+        batch.set_single(len);
+        Ok(1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn framed_receive_budget_preserves_large_packets_without_large_batches() {
+        for (limit, expected) in [(1372, 16), (4000, 8), (65507, 1)] {
+            let mut batch = TargetRecvBatch::with_byte_budget(limit, 32 * 1024);
+            assert_eq!(batch.buffers.len(), expected.min(2));
+            batch.grow_if_full(0);
+            assert_eq!(batch.buffers.len(), expected.min(2));
+            for _ in 0..5 {
+                batch.grow_if_full(batch.buffers.len());
+            }
+            assert_eq!(batch.buffers.len(), expected);
+            assert_eq!(batch.buffers[0].len(), limit + 1);
+            let bytes: usize = batch.buffers.iter().map(Vec::len).sum();
+            assert!(bytes <= (32 * 1024).max(limit + 1));
+            assert_eq!(batch.datagrams(usize::MAX).count(), expected);
+        }
+    }
 
     #[test]
     fn recv_batch_reports_only_received_datagrams() {

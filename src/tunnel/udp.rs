@@ -169,6 +169,49 @@ impl ConnectedUdpTarget {
     }
 }
 
+/// Bounded Linux receive batch for SOCKS5 frames. Payloads borrow receive
+/// storage: strip headers without moving bytes or changing datagram boundaries.
+#[cfg(target_os = "linux")]
+pub(crate) struct Socks5RecvBatch {
+    batch: target_udp::TargetRecvBatch,
+    last_count: usize,
+    payload_limit: usize,
+}
+
+#[cfg(target_os = "linux")]
+impl Socks5RecvBatch {
+    pub(crate) fn new(association: &UdpAssociation, payload_limit: usize) -> Self {
+        // Account for mapped IPv6 response headers even with an IPv4 target.
+        let packet_limit = association
+            .max_packet_size()
+            .min(payload_limit.saturating_add(22));
+        Self {
+            batch: target_udp::TargetRecvBatch::with_byte_budget(packet_limit, 32 * 1024),
+            last_count: 0,
+            payload_limit,
+        }
+    }
+
+    pub(crate) async fn recv(&mut self, socket: &UdpSocket) -> std::io::Result<usize> {
+        self.batch.grow_if_full(self.last_count);
+        self.last_count = 0;
+        let count = target_udp::recv_batch(socket, &mut self.batch).await?;
+        self.last_count = count;
+        Ok(count)
+    }
+
+    pub(crate) fn payloads<'a>(
+        &'a self,
+        association: &'a UdpAssociation,
+        count: usize,
+    ) -> impl Iterator<Item = &'a [u8]> {
+        self.batch
+            .datagrams(count)
+            .filter_map(|packet| association.decode(packet))
+            .filter(|payload| payload.len() <= self.payload_limit)
+    }
+}
+
 /// HTTP/2 needs only one UDP descriptor; the H3 send duplicate is dropped
 /// when converting the prepared target.
 pub(crate) struct Http2UdpTarget {
@@ -178,6 +221,20 @@ pub(crate) struct Http2UdpTarget {
 }
 
 impl Http2UdpTarget {
+    #[cfg(target_os = "linux")]
+    pub(crate) fn socks5_receiver(
+        &self,
+        payload_limit: usize,
+    ) -> Option<(Socks5RecvBatch, &UdpSocket, &UdpAssociation)> {
+        self.association.as_deref().map(|association| {
+            (
+                Socks5RecvBatch::new(association, payload_limit),
+                &self.recv_socket,
+                association,
+            )
+        })
+    }
+
     pub(crate) fn target_addr(&self) -> SocketAddr {
         self.target_addr
     }

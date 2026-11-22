@@ -456,3 +456,13 @@ retain that snapshot. No packet path locks or file reads are added. SOCKS
 credentials, budgets and counters retain their original owners. TLS/credential
 reload commits merge only their own evidence sections so they cannot overwrite
 a newer DIRECT fingerprint. Failed preparation publishes nothing.
+
+### SOCKS5 UDP receive batching
+
+On Linux, H2 and H3 use `Socks5RecvBatch` over `TargetRecvBatch` and the same
+readiness-driven `recvmmsg` wrapper as DIRECT. Receive capacity starts at two slots, grows after full reads, and is bounded by
+both 16 packets and a 32 KiB buffer budget (one large permitted datagram is
+always supported). SOCKS decoding is performed on each borrowed packet slice;
+invalid or truncated packets never suppress a later valid packet in the batch.
+The existing portable path remains selected on non-Linux builds. DIRECT I/O,
+SOCKS control ownership and target GSO policy are unchanged.

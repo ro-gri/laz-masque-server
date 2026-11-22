@@ -70,6 +70,28 @@ async fn socks5_tcp_and_udp_http2_use_checked_ips() {
             [CapsuleFrame::Datagram([&[0][..], &payload].concat())]
         );
     }
+    // A burst exercises multi-packet upstream reads and capsule boundaries.
+    let mut wire = Vec::new();
+    for tag in 0..32u8 {
+        encoder::encode_datagram_context_zero(&[tag; 64], &mut wire);
+    }
+    send.send_data(Bytes::from(wire), false).unwrap();
+    let mut decoder = CapsuleDecoder::new();
+    let frames = tokio::time::timeout(Duration::from_secs(3), async {
+        let mut frames = Vec::new();
+        while frames.len() < 32 {
+            let chunk = body.data().await.unwrap().unwrap();
+            body.flow_control().release_capacity(chunk.len()).unwrap();
+            frames.extend(decoder.decode(&chunk).unwrap());
+        }
+        frames
+    })
+    .await
+    .unwrap();
+    let expected: Vec<_> = (0..32u8)
+        .map(|tag| CapsuleFrame::Datagram([&[0][..], &[tag; 64]].concat()))
+        .collect();
+    assert_eq!(frames, expected);
     assert_eq!(proxy.requests.lock().unwrap().len(), 3);
     drop(proxy);
     let closed = tokio::time::timeout(Duration::from_secs(3), body.data())

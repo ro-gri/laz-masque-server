@@ -488,6 +488,49 @@ impl Shard {
         let target_datagram_size = self.max_datagram_size.clamp(1, MAX_DATAGRAM_SIZE);
         let recv_task = tokio::spawn(async move {
             let receive = async {
+                #[cfg(target_os = "linux")]
+                if let Some(association) = recv_association.as_deref() {
+                    let payload_limit = if capsule_transport {
+                        capsules::MAX_UDP_PAYLOAD
+                    } else {
+                        target_datagram_size
+                    };
+                    let mut batch =
+                        crate::tunnel::udp::Socks5RecvBatch::new(association, payload_limit);
+                    loop {
+                        let received = match batch.recv(&recv_socket).await {
+                            Ok(received) => received,
+                            Err(error) => {
+                                report_udp_receive_error(
+                                    &response_tx,
+                                    connection_index,
+                                    stream_id,
+                                    error,
+                                )
+                                .await;
+                                return;
+                            }
+                        };
+                        let datagrams: Vec<Vec<u8>> = batch
+                            .payloads(association, received)
+                            .map(|payload| header.encode(payload))
+                            .collect();
+                        if datagrams.is_empty() {
+                            continue;
+                        }
+                        if response_tx
+                            .send(UdpResponse {
+                                connection_index,
+                                stream_id,
+                                datagrams: Ok(datagrams),
+                            })
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                }
                 if capsule_transport || recv_association.is_some() {
                     // Large reliable fallback payloads use one receive buffer and
                     // one packet per queued message, keeping memory independent of

@@ -217,3 +217,109 @@ pub(super) fn decode_udp(packet: &[u8], target: SocketAddr) -> Option<&[u8]> {
     }
     packet.get(port_at + 2..)
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod batch_tests {
+    use super::*;
+    use crate::tunnel::udp::Socks5RecvBatch;
+    use std::time::Duration;
+    use tokio::net::{TcpListener, UdpSocket};
+    use tokio::sync::Semaphore;
+
+    #[tokio::test]
+    async fn linux_socks_batch_filters_each_frame_and_preserves_boundaries() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let control = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (_keepalive, _) = listener.accept().await.unwrap();
+        let target: SocketAddr = "203.0.113.1:53".parse().unwrap();
+        let mut header = vec![0, 0, 0];
+        encode_address(target, &mut header);
+        let association = UdpAssociation {
+            control,
+            header,
+            target,
+            max_payload: 200,
+            _active: Arc::new(Semaphore::new(1)).acquire_owned().await.unwrap(),
+        };
+        let receiver = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let sender = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        sender.connect(receiver.local_addr().unwrap()).unwrap();
+        receiver
+            .connect(sender.local_addr().unwrap())
+            .await
+            .unwrap();
+        let frame = |data: &[u8]| {
+            let mut bytes = Vec::new();
+            assert!(association.encode(data, &mut bytes));
+            bytes
+        };
+        let mut fragmented = frame(b"fragment");
+        fragmented[2] = 1;
+        let mut wrong_target = frame(b"wrong target");
+        wrong_target[9] ^= 1;
+        let mut reserved = frame(b"reserved");
+        reserved[0] = 1;
+        let mut mapped = vec![0, 0, 0, 4];
+        mapped.extend_from_slice(
+            &target
+                .ip()
+                .to_canonical()
+                .to_string()
+                .parse::<Ipv4Addr>()
+                .unwrap()
+                .to_ipv6_mapped()
+                .octets(),
+        );
+        mapped.extend_from_slice(&target.port().to_be_bytes());
+        mapped.extend_from_slice(b"mapped");
+        // Small transport budget: detect both sentinel-size oversize and MSG_TRUNC.
+        let mut batch = Socks5RecvBatch::new(&association, 64);
+        let packets = [
+            frame(b"first"),
+            fragmented,
+            frame(b""),
+            wrong_target,
+            vec![0, 0],
+            reserved,
+            mapped,
+            frame(&[9; 65]),
+            frame(&[8; 77]),
+            frame(&[7; 200]),
+            frame(&[6; 64]),
+        ];
+        for packet in &packets {
+            sender.send(packet).unwrap();
+        }
+        let mut processed = 0;
+        let mut payloads = Vec::new();
+        let mut saw_batch = false;
+        while processed < packets.len() {
+            let n = tokio::time::timeout(Duration::from_secs(2), batch.recv(&receiver))
+                .await
+                .unwrap()
+                .unwrap();
+            processed += n;
+            saw_batch |= n > 1;
+            payloads.extend(batch.payloads(&association, n).map(<[u8]>::to_vec));
+        }
+        assert!(saw_batch);
+        assert_eq!(processed, packets.len());
+        assert_eq!(
+            payloads,
+            [b"first".to_vec(), vec![], b"mapped".to_vec(), vec![6; 64]]
+        );
+        // Reuse does not expose stale lengths/truncation flags or wait for a full batch.
+        sender.send(&frame(b"next")).unwrap();
+        let n = tokio::time::timeout(Duration::from_secs(2), batch.recv(&receiver))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(
+            batch.payloads(&association, n).collect::<Vec<_>>(),
+            [b"next".as_slice()]
+        );
+    }
+}

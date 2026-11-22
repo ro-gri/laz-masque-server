@@ -208,5 +208,46 @@ fn exercise(endpoint: SocketAddr, tcp_target: SocketAddr, udp_target: SocketAddr
                 );
             }
         }
+        // Two kernel batches worth of responses; preserve boundaries and order
+        // in reliable capsules, and all unique messages in native datagrams.
+        if native {
+            for tag in 0..32u8 {
+                client
+                    .quic
+                    .dgram_send(&DatagramHeader::new(udp).unwrap().encode(&[tag; 64]))
+                    .unwrap();
+            }
+            let mut seen = std::collections::BTreeSet::new();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut buf = [0; 1500];
+            while seen.len() < 32 {
+                client.drive().unwrap();
+                while let Ok(n) = client.quic.dgram_recv(&mut buf) {
+                    let decoded = masque::datagram::decode_ref(&buf[..n]).unwrap();
+                    assert_eq!(decoded.stream_id, udp);
+                    assert_eq!(decoded.payload.len(), 64);
+                    let tag = decoded.payload[0];
+                    assert!(tag < 32);
+                    assert_eq!(decoded.payload, &[tag; 64]);
+                    assert!(seen.insert(tag));
+                }
+                assert!(Instant::now() < deadline);
+            }
+        } else {
+            let mut wire = Vec::new();
+            for tag in 0..32u8 {
+                masque::capsule::encoder::encode_datagram_context_zero(&[tag; 64], &mut wire);
+            }
+            client
+                .h3
+                .as_mut()
+                .unwrap()
+                .send_body(&mut client.quic, udp, &wire, false)
+                .unwrap();
+            let expected: Vec<_> = (0..32u8)
+                .map(|tag| CapsuleFrame::Datagram([&[0][..], &[tag; 64]].concat()))
+                .collect();
+            assert_eq!(client.capsules(udp, 32, Duration::from_secs(5)), expected);
+        }
     }
 }
