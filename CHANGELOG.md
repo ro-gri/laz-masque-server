@@ -20,6 +20,11 @@ pre-1.0.
 
 ### Added
 
+- Add `POST /kickAuth` on the local accounting API to disconnect a credential
+  UUID across H2/H3 and invalidate its authorization cache, with independent
+  best-effort steps and a generic result. Preserve cumulative traffic counters.
+
+
 - Add optional loopback `GET /stats` accounting with a startup instance UUID,
   cumulative payload RX/TX and online credential UUIDs across H2/H3 and all
   tunnel types. Retain counters across reload, cache expiry and disconnect

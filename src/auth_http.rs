@@ -198,6 +198,16 @@ struct AuthorizationResponse {
 }
 
 impl HttpAuth {
+    pub(crate) fn invalidate(&self, id: Uuid) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        state.cache.retain(|_, (cached_id, _)| *cached_id != id);
+        let State { cache, order, .. } = &mut *state;
+        order.retain(|key| cache.contains_key(key));
+        true
+    }
+
     pub(crate) fn new(auth: &AuthorizationSection) -> anyhow::Result<Arc<Self>> {
         validate(auth)?;
         let cfg = auth
@@ -363,6 +373,37 @@ mod tests {
             }),
         }
     }
+    #[tokio::test]
+    async fn invalidate_removes_all_credentials_for_uuid_but_keeps_other_users() {
+        let id = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let authorizer = AuthorizationServer::start(move |request| {
+            Reply::json(
+                serde_json::json!({"ok": true, "id": if request["username"] == "bob" { other } else { id }}),
+            )
+        });
+        let auth = HttpAuth::new(&config(&authorizer)).unwrap();
+        for password in [b"first".as_slice(), b"second".as_slice()] {
+            assert_eq!(
+                auth.basic(b"alice", password).unwrap().verify().await,
+                Some(id)
+            );
+        }
+        assert_eq!(auth.certificate(b"key").unwrap().verify().await, Some(id));
+        assert_eq!(
+            auth.basic(b"bob", b"secret").unwrap().verify().await,
+            Some(other)
+        );
+        assert!(auth.invalidate(id));
+        assert_eq!(auth.basic(b"alice", b"first").unwrap().cached(), None);
+        assert_eq!(auth.basic(b"alice", b"second").unwrap().cached(), None);
+        assert_eq!(auth.certificate(b"key").unwrap().cached(), None);
+        assert_eq!(auth.basic(b"bob", b"secret").unwrap().cached(), Some(other));
+        let state = auth.state.lock().unwrap();
+        assert_eq!(state.cache.len(), 1);
+        assert_eq!(state.order.len(), 1);
+    }
+
     #[tokio::test]
     async fn keepalive_cache_password_isolation_and_coalescing() {
         let id = Uuid::new_v4();

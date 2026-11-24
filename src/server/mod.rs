@@ -600,9 +600,14 @@ impl Server {
         }
 
         let accounting_api = match config.accounting.listen_addr {
-            Some(addr) => {
-                Some(crate::accounting_http::Server::bind(addr, shared.accounting.clone()).await?)
-            }
+            Some(addr) => Some(
+                crate::accounting_http::Server::bind(
+                    addr,
+                    shared.accounting.clone(),
+                    shared.basic_auth.iter().flatten().cloned().collect(),
+                )
+                .await?,
+            ),
             None => None,
         };
         let observability = match config.observability.listen_addr {
@@ -1959,6 +1964,7 @@ impl Shard {
         // iterations so its allocation is reused.
         let mut serviced: Vec<u64> = Vec::new();
         let mut deadline_timer = DeadlineTimer::new();
+        let mut kicks = self.shared.accounting.sessions.subscribe();
 
         loop {
             self.dirty.end_round();
@@ -2009,11 +2015,13 @@ impl Shard {
                 TunInbound(Option<Vec<u8>>),
                 /// Credentials finished verifying off the event loop.
                 AuthDone(Option<AuthOutcome>),
+                KickAuth,
                 Shutdown,
                 Timeout,
             }
 
             let event = tokio::select! {
+                    _ = kicks.changed() => Event::KickAuth,
                     _ = shutdown.wait_for(|requested| *requested), if !shutting_down => {
                         Event::Shutdown
                     }
@@ -2052,6 +2060,7 @@ impl Shard {
             };
 
             match event {
+                Event::KickAuth => self.kick_auth_sessions(),
                 Event::Shutdown => {
                     info!(
                         shard = self.index,

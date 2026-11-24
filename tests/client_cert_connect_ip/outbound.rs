@@ -16,11 +16,28 @@ fn socks5_http3_tcp_udp_native_and_capsules() {
         proxy.addr,
         "203.0.113.1:443".parse().unwrap(),
         "203.0.113.1:53".parse().unwrap(),
+        false,
     );
     assert_eq!(proxy.requests.lock().unwrap().len(), 4);
 }
 
-fn exercise(endpoint: SocketAddr, tcp_target: SocketAddr, udp_target: SocketAddr) {
+#[test]
+fn socks5_http3_kick_auth_closes_tcp_and_udp_native_and_capsules() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let proxy = runtime.block_on(mock::MockSocks::start());
+    exercise(
+        proxy.addr,
+        "203.0.113.1:443".parse().unwrap(),
+        "203.0.113.1:53".parse().unwrap(),
+        true,
+    );
+}
+
+fn exercise(endpoint: SocketAddr, tcp_target: SocketAddr, udp_target: SocketAddr, kick: bool) {
     let dir = TempDir::new("socks5-http3");
     let key = p256_key();
     let (cert, key) = write_pem(
@@ -45,7 +62,18 @@ fn exercise(endpoint: SocketAddr, tcp_target: SocketAddr, udp_target: SocketAddr
         endpoint,
         ..Default::default()
     });
-    let peer = spawn_server(config)[0];
+    let id = uuid::Uuid::new_v4();
+    if kick {
+        config.listeners[0].auth = masque::config::AuthSection {
+            id,
+            username: "alice".into(),
+            password_hash: masque::auth::hash_password(b"secret").unwrap(),
+            ..Default::default()
+        };
+        config.accounting.listen_addr = Some(ephemeral_addr());
+    }
+    let (peers, _, stats) = spawn_server_endpoints(config);
+    let peer = peers[0];
     for native in [false, true] {
         let mut client = Client::connect_with_transport(
             peer,
@@ -68,6 +96,7 @@ fn exercise(endpoint: SocketAddr, tcp_target: SocketAddr, udp_target: SocketAddr
                 &[
                     quiche::h3::Header::new(b":method", b"CONNECT"),
                     quiche::h3::Header::new(b":authority", tcp_target.to_string().as_bytes()),
+                    quiche::h3::Header::new(b"proxy-authorization", b"Basic YWxpY2U6c2VjcmV0"),
                 ],
                 false,
             )
@@ -80,7 +109,7 @@ fn exercise(endpoint: SocketAddr, tcp_target: SocketAddr, udp_target: SocketAddr
             .h3
             .as_mut()
             .unwrap()
-            .send_body(&mut client.quic, tcp, b"TCP via SOCKS5", true)
+            .send_body(&mut client.quic, tcp, b"TCP via SOCKS5", !kick)
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut echoed = Vec::new();
@@ -124,6 +153,7 @@ fn exercise(endpoint: SocketAddr, tcp_target: SocketAddr, udp_target: SocketAddr
                         .as_bytes(),
                     ),
                     quiche::h3::Header::new(b"capsule-protocol", b"?1"),
+                    quiche::h3::Header::new(b"proxy-authorization", b"Basic YWxpY2U6c2VjcmV0"),
                 ],
                 false,
             )
@@ -164,6 +194,27 @@ fn exercise(endpoint: SocketAddr, tcp_target: SocketAddr, udp_target: SocketAddr
                     [CapsuleFrame::Datagram([&[0][..], &payload].concat())]
                 );
             }
+        }
+        if kick {
+            let stats = stats.unwrap();
+            let before = accounting::wait(stats, |v| v["online"] == serde_json::json!([id]));
+            assert_eq!(accounting::kick(stats, id), serde_json::json!({"ok": true}));
+            let after = accounting::read(stats);
+            assert_eq!(after["online"], serde_json::json!([]));
+            assert_eq!(after["traffic"], before["traffic"]);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut reset = std::collections::HashSet::new();
+            while reset.len() < 2 {
+                assert!(Instant::now() < deadline);
+                client.drive().unwrap();
+                while let Ok((stream, event)) = client.h3.as_mut().unwrap().poll(&mut client.quic) {
+                    if matches!(event, quiche::h3::Event::Reset(_)) {
+                        assert!(stream == tcp || stream == udp);
+                        reset.insert(stream);
+                    }
+                }
+            }
+            assert!(!client.quic.is_closed());
         }
     }
 }

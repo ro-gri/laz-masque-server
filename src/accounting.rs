@@ -16,8 +16,28 @@ struct Counters {
 
 /// A stable counter reference, acquired once at tunnel setup, not per packet.
 #[derive(Clone, Default)]
-pub(crate) struct Usage(Option<Arc<Counters>>);
+pub(crate) struct Usage(
+    Option<Arc<Counters>>,
+    Option<Arc<crate::kick_auth::Session>>,
+);
 impl Usage {
+    pub(crate) fn kick_failed(&self) {
+        if let Some(session) = &self.1 {
+            session.fail();
+        }
+    }
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.1
+            .as_ref()
+            .is_some_and(|session| session.is_cancelled())
+    }
+    pub(crate) async fn cancelled(&self) {
+        match &self.1 {
+            Some(session) => session.cancelled().await,
+            None => std::future::pending().await,
+        }
+    }
+
     pub(crate) fn rx(&self, bytes: usize) {
         if let Some(c) = &self.0 {
             c.rx.fetch_add(bytes as u64, Ordering::Relaxed);
@@ -53,6 +73,7 @@ struct Entries {
 pub(crate) struct Accounting {
     pub(crate) instance_id: Uuid,
     enabled: bool,
+    pub(crate) sessions: Arc<crate::kick_auth::Sessions>,
     entries: Mutex<Entries>,
 }
 impl Accounting {
@@ -60,6 +81,7 @@ impl Accounting {
         Self {
             instance_id: Uuid::new_v4(),
             enabled: config.listen_addr.is_some(),
+            sessions: Arc::new(crate::kick_auth::Sessions::default()),
             entries: Mutex::new(Entries::default()),
         }
     }
@@ -72,12 +94,12 @@ impl Accounting {
         };
         let mut entries = self.entries.lock().expect("accounting registry poisoned");
         if let Some(usage) = entries.index.get(&id) {
-            return usage.clone();
+            return Usage(usage.0.clone(), Some(self.sessions.register(id)));
         }
-        let usage = Usage(Some(Arc::new(Counters::default())));
+        let usage = Usage(Some(Arc::new(Counters::default())), None);
         entries.index.insert(id, usage.clone());
         entries.rows.push((id, usage.clone()));
-        usage
+        Usage(usage.0, Some(self.sessions.register(id)))
     }
     pub(crate) fn len(&self) -> usize {
         self.entries

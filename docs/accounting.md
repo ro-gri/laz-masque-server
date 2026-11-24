@@ -1,6 +1,6 @@
-# Per-credential accounting API
+# Per-credential accounting and session control API
 
-Enable the read-only local API independently of Prometheus:
+Enable the local API independently of Prometheus:
 
 ```toml
 [accounting]
@@ -9,7 +9,7 @@ listen_addr = "127.0.0.1:9091"
 
 Omitting `listen_addr` disables the API and credential counter allocation.
 Only loopback addresses are accepted. The endpoint has no authentication and
-is intended for trusted local collectors. It is not a public proxy listener.
+is intended for trusted local collectors and control services. It is not a public proxy listener.
 Changing its configuration requires restart.
 
 `GET /stats` returns JSON and closes the HTTP connection:
@@ -82,3 +82,52 @@ references and atomic increments without UUID lookups or HTTP calls.
 An external collector can poll this endpoint and associate each UUID with its
 credential record. Keep the previous counters together with `instance_id` to
 calculate traffic deltas; a changed instance ID starts a new counter baseline.
+
+## Disconnect and clear authorization: `POST /kickAuth`
+
+Use the same address and port as `/stats`:
+
+```sh
+curl --request POST http://127.0.0.1:9091/kickAuth \
+  --header 'Content-Type: application/json' \
+  --data '{"id":"123e4567-e89b-42d3-a456-426614174000"}'
+```
+
+The body must contain exactly one `id`, a non-nil UUID. Requests require
+`Content-Type: application/json` and `Content-Length`, with a maximum body of
+256 bytes. Chunked requests and browser Origin headers are rejected. The API
+has no browser CORS support; it is for local service-to-service use.
+
+For the UUID, the server requests cancellation of every registered tunnel
+(including authorized target setups), across all listeners and both H2/H3.
+CONNECT, CONNECT-UDP and CONNECT-IP are included. It independently removes all
+matching successful authorization-cache entries from the listener snapshots,
+including HTTP Basic/certificate decisions and file Basic password tags.
+An error in either operation does not skip the other operation or the remaining
+sessions/listeners. Local tunnel teardown is awaited for up to five seconds
+in total, not five seconds per tunnel. A timeout does not undo cancellation.
+
+- HTTP 200 with `{"ok":true}`: all selected sessions were released locally and
+  cache invalidation succeeded. An unknown or already-disconnected UUID succeeds.
+- HTTP 500 with `{"ok":false}`: at least one operation failed or timed out.
+  No per-session, cache or internal error details are returned.
+- HTTP 400 with `{"ok":false}`: invalid request; no action was taken.
+
+The response closes the HTTP connection. Success confirms local teardown,
+not receipt of a reset by a remote client. Other UUIDs on the same transport
+connection remain active. Cumulative traffic and `instance_id` are preserved;
+`online` reflects the remaining live tunnels.
+
+This command is not a ban and does not modify credentials, files or the HTTP
+authorization server. Allowed credentials can reconnect immediately. There is
+no synchronization barrier around authorization: an in-flight check can finish
+after the kick, repopulate the cache and establish a new session. If access must
+be revoked, change the credential source first; retry the kick when necessary.
+
+Session tracking is active only while this API is enabled and retains active
+or preparing tunnels, removing their entries on teardown. Registration happens
+after authorization. H2 tasks wait on cancellation notifications; H3 shards
+scan their local tunnels only on a management notification. Packet accounting
+keeps its existing atomic counter path, with no per-packet UUID lookup. The
+four-request concurrency limit and 30-second HTTP request deadline also apply
+to this route.

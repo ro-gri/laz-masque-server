@@ -421,6 +421,27 @@ fn http_precheck(attempt: crate::auth_http::Attempt) -> AuthPrecheck {
 }
 
 impl SharedBasicAuthenticator {
+    pub(crate) fn invalidate(&self, id: uuid::Uuid) -> bool {
+        let Ok(current) = self.current.read() else {
+            return false;
+        };
+        let mut success = true;
+        if let Some(http) = &current.http {
+            success &= http.invalidate(id);
+        }
+        for credential in current
+            .users
+            .values()
+            .filter(|credential| credential.id == id)
+        {
+            match credential.verification.lock() {
+                Ok(mut state) => state.success = None,
+                Err(_) => success = false,
+            }
+        }
+        success
+    }
+
     pub(crate) fn new(auth: BasicAuthenticator) -> Self {
         Self {
             current: RwLock::new(Arc::new(auth)),
@@ -539,6 +560,74 @@ mod tests {
                 password,
             } => credential.verify(&password),
         }
+    }
+
+    #[tokio::test]
+    async fn kick_cache_failure_does_not_skip_sessions_or_other_listeners() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let id = uuid::Uuid::new_v4();
+        let make = || {
+            Arc::new(SharedBasicAuthenticator::new(
+                BasicAuthenticator::from_section(&AuthSection {
+                    id,
+                    username: "alice".into(),
+                    password_hash: hash_password(b"secret").unwrap(),
+                    ..Default::default()
+                })
+                .unwrap(),
+            ))
+        };
+        let broken = make();
+        let good = make();
+        let header = b"Basic YWxpY2U6c2VjcmV0";
+        if let AuthPrecheck::NeedsVerify {
+            credential: VerificationCredential::File(credential),
+            password,
+        } = good.precheck(Some(header))
+        {
+            assert!(credential.verify(&password));
+        } else {
+            panic!("expected cold authentication");
+        }
+        let poison = broken.clone();
+        assert!(
+            std::thread::spawn(move || {
+                let _held = poison.current.write().unwrap();
+                panic!("injected cache failure");
+            })
+            .join()
+            .is_err()
+        );
+        let config = crate::config::AccountingSection {
+            listen_addr: Some("127.0.0.1:0".parse().unwrap()),
+        };
+        let accounting = Arc::new(crate::accounting::Accounting::new(&config));
+        let usage = accounting.acquire(Some(id));
+        let session = tokio::spawn(async move {
+            usage.cancelled().await;
+        });
+        let api = crate::accounting_http::Server::bind(
+            config.listen_addr.unwrap(),
+            accounting,
+            vec![broken, good.clone()],
+        )
+        .await
+        .unwrap();
+        let addr = api.local_addr().unwrap();
+        let task = api.spawn();
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let body = serde_json::json!({"id": id}).to_string();
+        stream.write_all(format!("POST /kickAuth HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}", body.len(), body).as_bytes()).await.unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).await.unwrap();
+        assert!(response.starts_with("HTTP/1.1 500"));
+        assert_eq!(response.split_once("\r\n\r\n").unwrap().1, "{\"ok\":false}");
+        session.await.unwrap();
+        assert!(matches!(
+            good.precheck(Some(header)),
+            AuthPrecheck::NeedsVerify { .. }
+        ));
+        task.abort();
     }
 
     #[test]

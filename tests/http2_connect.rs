@@ -1879,3 +1879,128 @@ async fn http_authorization_reload_clears_cache_and_rejects_invalid_replacement(
     driver.abort();
     server.abort();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn kick_auth_disconnects_uuid_tcp_udp_and_invalidates_cache_across_listeners() {
+    use masque::config::{AuthBackend, HttpAuthSection};
+    let id = uuid::Uuid::new_v4();
+    let other_id = uuid::Uuid::new_v4();
+    let allowed = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let permission = allowed.clone();
+    let authorizer = auth_server::AuthorizationServer::start(move |request| {
+        let other = request["username"] == "bob";
+        auth_server::Reply::json(serde_json::json!({
+            "ok": other || permission.load(Ordering::Relaxed),
+            "id": if other { other_id } else { id }
+        }))
+    });
+    let files = TestFiles::new();
+    let mut config = http2_config(&files);
+    config.listeners[0].auth = Default::default();
+    config.listeners.push(config.listeners[0].clone());
+    config.authorization = masque::config::AuthorizationSection {
+        backend: AuthBackend::Http,
+        http: Some(HttpAuthSection {
+            url: authorizer.url(),
+            ..Default::default()
+        }),
+    };
+    config.ip_proxy.enabled = true;
+    config.ip_proxy.ipv4_pool = "192.0.2.0/30".into();
+    config.ip_proxy.ipv6_pool.clear();
+    config.accounting.listen_addr = Some("127.0.0.1:0".parse().unwrap());
+    let mut bound = Server::bind(config).await.unwrap();
+    let addresses = bound.listen_addrs().to_vec();
+    let stats = bound.accounting_addr().unwrap();
+    let server = tokio::spawn(async move {
+        bound.run().await.unwrap();
+    });
+    let (mut client, driver) = connect_h2(addresses[0]).await;
+    let (mut second, second_driver) = connect_h2(addresses[1]).await;
+    let tcp = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let udp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let authorize = |mut request: Request<()>, name: &str| {
+        request.headers_mut().insert(
+            "proxy-authorization",
+            format!("Basic {}", STANDARD.encode(format!("{name}:secret")))
+                .parse()
+                .unwrap(),
+        );
+        request
+    };
+    let (response, _tcp_send) = client
+        .send_request(
+            authorize(connect_request(tcp.local_addr().unwrap()), "alice"),
+            false,
+        )
+        .unwrap();
+    let mut tcp_body = response.await.unwrap().into_body();
+    let (mut target, _) = tcp.accept().await.unwrap();
+    let udp_request = || udp_capsules::udp_request(udp.local_addr().unwrap());
+    let (response, _udp_send) = second
+        .send_request(authorize(udp_request(), "alice"), false)
+        .unwrap();
+    let mut udp_body = response.await.unwrap().into_body();
+    let (response, _ip_send) = second
+        .send_request(authorize(connect_ip_request("connect-ip"), "alice"), false)
+        .unwrap();
+    let response = response.await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut ip_body = response.into_body();
+    let setup = tokio::time::timeout(Duration::from_secs(3), ip_body.data())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    ip_body
+        .flow_control()
+        .release_capacity(setup.len())
+        .unwrap();
+    // A different credential shares the first physical H2 connection.
+    let (response, mut bob_send) = client
+        .send_request(authorize(udp_request(), "bob"), false)
+        .unwrap();
+    let mut bob_body = response.await.unwrap().into_body();
+    assert_eq!(authorizer.count(), 2);
+    let before = accounting::wait(stats, |value| {
+        value["online"].as_array().unwrap().len() == 2
+    });
+    allowed.store(false, Ordering::Relaxed);
+    assert_eq!(accounting::kick(stats, id), serde_json::json!({"ok": true}));
+    let after = accounting::read(stats);
+    assert_eq!(after["online"], serde_json::json!([other_id]));
+    assert_eq!(after["instance_id"], before["instance_id"]);
+    assert_eq!(after["traffic"], before["traffic"]);
+    for body in [&mut tcp_body, &mut udp_body, &mut ip_body] {
+        let result = tokio::time::timeout(Duration::from_secs(3), body.data())
+            .await
+            .unwrap();
+        assert!(result.is_none() || result.unwrap().is_err());
+    }
+    let closed = tokio::time::timeout(Duration::from_secs(3), target.read(&mut [0]))
+        .await
+        .unwrap();
+    assert!(matches!(closed, Ok(0)) || closed.is_err());
+    let mut wire = Vec::new();
+    encoder::encode_datagram_context_zero(b"still online", &mut wire);
+    bob_send.send_data(Bytes::from(wire), false).unwrap();
+    udp_capsules::assert_echo(&udp, &mut bob_body, b"still online").await;
+    let (response, _) = client
+        .send_request(authorize(udp_request(), "alice"), false)
+        .unwrap();
+    assert_eq!(response.await.unwrap().status(), StatusCode::NOT_FOUND);
+    assert_eq!(authorizer.count(), 3);
+    // A single-address pool must be reusable immediately after kick completion.
+    let (response, _bob_ip_send) = client
+        .send_request(authorize(connect_ip_request("connect-ip"), "bob"), false)
+        .unwrap();
+    assert_eq!(response.await.unwrap().status(), StatusCode::OK);
+
+    assert_eq!(
+        accounting::kick(stats, uuid::Uuid::new_v4()),
+        serde_json::json!({"ok": true})
+    );
+    driver.abort();
+    second_driver.abort();
+    server.abort();
+}

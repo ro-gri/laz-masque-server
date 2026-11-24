@@ -1185,7 +1185,8 @@ a restart. See the routing guide for command results and snapshot semantics.
 
 ## Credential traffic accounting
 
-`[accounting].listen_addr` enables a separate loopback-only `GET /stats` API.
+`[accounting].listen_addr` enables a separate loopback-only API with `GET /stats`
+and `POST /kickAuth` to disconnect a UUID and invalidate its authorization cache.
 It is disabled by default and independent of `[observability]`/Prometheus.
 The response contains a startup instance UUID, cumulative RX/TX by credential
 UUID and the set of online credentials. Counters survive authorization-cache

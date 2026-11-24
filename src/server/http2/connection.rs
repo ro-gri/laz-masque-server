@@ -340,26 +340,34 @@ async fn handle_request(
     context.usage = context.shared.accounting.acquire(id);
     let (_parts, body) = request.into_parts();
 
-    let result = match kind {
-        RequestKind::Tcp(target) => {
-            tcp::serve(stream_id, target, body, respond, context, tunnel_slot).await
+    let cancellation = context.usage.clone();
+    let relay = async move {
+        match kind {
+            RequestKind::Tcp(target) => {
+                tcp::serve(stream_id, target, body, respond, context, tunnel_slot).await
+            }
+            RequestKind::Udp(target) => {
+                udp::serve(stream_id, target, body, respond, context, tunnel_slot).await
+            }
+            RequestKind::Ip(capsule_mode) => {
+                ip::serve(
+                    connection_index,
+                    stream_id,
+                    body,
+                    respond,
+                    context,
+                    authenticated_identity,
+                    capsule_mode,
+                    tunnel_slot,
+                )
+                .await
+            }
         }
-        RequestKind::Udp(target) => {
-            udp::serve(stream_id, target, body, respond, context, tunnel_slot).await
-        }
-        RequestKind::Ip(capsule_mode) => {
-            ip::serve(
-                connection_index,
-                stream_id,
-                body,
-                respond,
-                context,
-                authenticated_identity,
-                capsule_mode,
-                tunnel_slot,
-            )
-            .await
-        }
+    };
+    let result = tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => return,
+        result = relay => result,
     };
     if let Err(error) = result {
         debug!(stream_id, %error, "HTTP/2 tunnel closed with an error");

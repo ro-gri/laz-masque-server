@@ -3,6 +3,75 @@
 use super::*;
 
 impl Shard {
+    // Scan only on an explicit management wakeup, never on the packet path.
+    pub(super) fn kick_auth_sessions(&mut self) {
+        for client in self.connections.values_mut() {
+            let mut cancelled = Vec::new();
+            cancelled.extend(
+                client
+                    .pending_tcp_tunnels
+                    .iter()
+                    .filter(|(_, t)| t.usage.is_cancelled())
+                    .map(|(id, t)| (*id, t.usage.clone())),
+            );
+            cancelled.extend(
+                client
+                    .tcp_tunnels
+                    .iter()
+                    .filter(|(_, t)| t.usage.is_cancelled())
+                    .map(|(id, t)| (*id, t.usage.clone())),
+            );
+            cancelled.extend(
+                client
+                    .pending_udp_tunnels
+                    .iter()
+                    .filter(|(_, t)| t.usage.is_cancelled())
+                    .map(|(id, t)| (*id, t.usage.clone())),
+            );
+            cancelled.extend(
+                client
+                    .udp_tunnels
+                    .iter()
+                    .filter(|(_, t)| t.usage.is_cancelled())
+                    .map(|(id, t)| (*id, t.usage.clone())),
+            );
+            cancelled.extend(
+                client
+                    .pending_ip_responses
+                    .iter()
+                    .filter(|(_, (_, usage))| usage.is_cancelled())
+                    .map(|(id, (_, usage))| (*id, usage.clone())),
+            );
+            cancelled.extend(
+                client
+                    .ip_tunnels
+                    .iter()
+                    .filter(|(_, t)| t.usage.is_cancelled())
+                    .map(|(id, t)| (*id, t.usage.clone())),
+            );
+            for (stream_id, usage) in cancelled {
+                let code = quiche::h3::WireErrorCode::RequestCancelled as u64;
+                for direction in [quiche::Shutdown::Read, quiche::Shutdown::Write] {
+                    match client.quic.stream_shutdown(stream_id, direction, code) {
+                        Ok(()) | Err(quiche::Error::Done) => {}
+                        Err(quiche::Error::InvalidStreamState(_))
+                            if client.quic.stream_closed(stream_id) => {}
+                        Err(_) => usage.kick_failed(),
+                    }
+                }
+                client.pending_tcp_tunnels.remove(&stream_id);
+                client.tcp_tunnels.remove(&stream_id);
+                client.tcp_read_resumes.remove(&stream_id);
+                client.pending_udp_tunnels.remove(&stream_id);
+                client.udp_tunnels.remove(&stream_id);
+                client.pending_ip_responses.remove(&stream_id);
+                Self::teardown_ip_tunnel(&self.shared, client, stream_id, client.index);
+                client.remove_capsule_stream(stream_id);
+                self.dirty.mark(client.index);
+            }
+        }
+    }
+
     /// Apply the tunnel setups a batch of CONNECT requests produced.
     ///
     /// Split out of `handle_packet` because a request whose credentials are

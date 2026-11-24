@@ -463,3 +463,13 @@ TCP/UDP survival, failed file validation, and retention of startup credentials.
 credential reload. `cargo test --test check_config status_compares` exercises
 the real CLI/socket command, unchanged/error results, startup-path pinning,
 independence from malformed TOML, and unchanged pending TLS/Basic edits.
+
+### Credential disconnect API
+
+`cargo test kick` covers UUID isolation, cancellation completion/failure/timeout,
+cache invalidation after partial failure, bounded request validation, and H2/H3
+TCP/UDP teardown. The H3 HTTP authorization test also kicks Basic and certificate
+CONNECT-IP sessions and checks a fresh authorization denial. Full H2/H3 suites
+cover the surrounding authentication, reload and tunnel lifecycle. These local
+tests exercise IP setup and teardown; Linux TUN forwarding remains a separate
+platform check.

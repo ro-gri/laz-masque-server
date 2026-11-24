@@ -482,3 +482,11 @@ reload. Entries have no eviction or cardinality limit: memory grows with distinc
 admitted credentials, as documented in [the API contract](accounting.md).
 `accounting_http.rs` streams bounded batches on a separate optional loopback
 socket, with bounded concurrent requests and abort-on-shutdown task ownership.
+
+The same socket accepts `POST /kickAuth`. A bounded-by-tunnel-count registry
+tracks cancellation/completion independently of retained statistics. H2 drops
+selected relay futures; H3 owners wake and reset selected streams, releasing
+TCP/UDP resources and CONNECT-IP routes/leases. Cache invalidation and session
+teardown run independently, with a generic aggregate result and a fixed wait
+budget. Authorization is not serialized with this operation: in-flight checks
+and new sessions can complete after its snapshot. See [the API contract](accounting.md#disconnect-and-clear-authorization-post-kickauth).

@@ -5,6 +5,7 @@ backend = "file"
 
 # Optional per-credential cumulative traffic and online UUIDs, independent of
 # Prometheus. Retains all encountered UUIDs until process exit; no eviction.
+# Also exposes POST /kickAuth for local UUID disconnect/cache invalidation.
 # [accounting]
 # listen_addr = "127.0.0.1:9091"
 

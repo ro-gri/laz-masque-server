@@ -3665,10 +3665,20 @@ fn http_authorization_h3_basic_and_certificate_gate_connect_ip() {
             value["traffic"],
             serde_json::json!([{ "id": id, "rx_bytes": 0, "tx_bytes": 0 }])
         );
-        client.quic.close(true, 0, b"done").unwrap();
-        client.flush().unwrap();
+        permitted.store(false, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(accounting::kick(stats, id), serde_json::json!({"ok": true}));
+        let rejected = client
+            .send_connect_ip_with_credentials("connect-ip", credentials)
+            .unwrap();
+        assert_eq!(
+            client
+                .response_status(rejected, Duration::from_secs(5))
+                .unwrap(),
+            404
+        );
+
         accounting::wait(stats, |value| value["online"] == serde_json::json!([]));
-        assert_eq!(authorizer.count(), 2);
+        assert_eq!(authorizer.count(), 3);
         assert_eq!(
             authorizer
                 .connections
