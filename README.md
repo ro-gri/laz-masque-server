@@ -21,6 +21,7 @@ a staging environment.
   authentication against a public-key roster
 - Multiple listeners in one process, each with its own Basic or client-certificate
   authentication mode while sharing proxy policies, client roster, and TUN state
+- Optional [IP/CIDR outbound routing](docs/outbound-routing.md) through a local SOCKS5 TCP/UDP upstream
 - Global CIDR allow and deny policies for TCP and UDP targets, with optional
   per-listener CIDR and port restrictions
 - Adaptive QUIC Retry plus process-wide per-source connection and Basic-auth

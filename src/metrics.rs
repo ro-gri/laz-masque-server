@@ -19,6 +19,7 @@ const SHARD_STALE_AFTER: Duration = Duration::from_secs(5);
 
 /// Process-wide metrics and readiness state.
 pub(crate) struct Metrics {
+    outbound: Option<Arc<crate::outbound::Router>>,
     enabled: bool,
     ready: AtomicBool,
     connect_ip_enabled: bool,
@@ -36,6 +37,7 @@ pub(crate) struct Metrics {
 impl Metrics {
     pub(crate) fn new(enabled: bool) -> Self {
         Self {
+            outbound: None,
             enabled,
             ready: AtomicBool::new(false),
             connect_ip_enabled: false,
@@ -52,6 +54,11 @@ impl Metrics {
             roster_reload_failure: AtomicU64::new(0),
             forced_shutdowns: AtomicU64::new(0),
         }
+    }
+
+    pub(crate) fn with_outbound(mut self, outbound: Arc<crate::outbound::Router>) -> Self {
+        self.outbound = Some(outbound);
+        self
     }
 
     /// Record immutable startup capability, independently of process readiness.
@@ -172,6 +179,9 @@ impl Metrics {
     /// Render a self-contained Prometheus text response.
     pub(crate) fn render(&self) -> String {
         let mut out = String::with_capacity(8 * 1024);
+        if let Some(outbound) = &self.outbound {
+            outbound.render_metrics(&mut out);
+        }
         metric_header(
             &mut out,
             "masque_build_info",

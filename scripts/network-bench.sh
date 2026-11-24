@@ -262,6 +262,28 @@ enabled = false
 EOF
 
 
+# Optional local upstream for directly comparable DIRECT/SOCKS5 runs.
+if [ -n "${MASQUE_BENCH_SOCKS5_ADDR:-}" ]; then
+    python3 - "$BENCH_DIR/masque.toml" "$MASQUE_BENCH_SOCKS5_ADDR" <<'PYOUTBOUND'
+import ipaddress
+import json
+import os
+from pathlib import Path
+import sys
+host, port = sys.argv[2].rsplit(":", 1)
+address = ipaddress.ip_address(host.strip("[]"))
+if not address.is_loopback or not 1 <= int(port) <= 65535:
+    raise SystemExit("benchmark SOCKS5 endpoint must be loopback with a valid port")
+packet_budget = int(os.environ.get("MASQUE_BENCH_SOCKS5_UDP_MAX_PACKET_SIZE", "65507"))
+if not 23 <= packet_budget <= 65507:
+    raise SystemExit("benchmark SOCKS5 UDP packet budget must be 23..65507")
+with Path(sys.argv[1]).open("a") as config:
+    config.write('\n[outbound]\ndefault_route = "socks5"\n[outbound.socks5]\n')
+    config.write("endpoint = " + json.dumps(sys.argv[2]) + "\n")
+    config.write(f"udp_max_packet_size = {packet_budget}\n")
+PYOUTBOUND
+fi
+
 if [ "$BENCH_TRANSPORT" = http3 ] || [ "$BENCH_TRANSPORT" = both ]; then
     cat >>"$BENCH_DIR/masque.toml" <<EOF
 

@@ -41,6 +41,7 @@ pub(super) async fn serve(
         false,
         max_payload,
         &context.resolver,
+        &context.shared.outbound,
     );
     let Some(result) = until_reset(&mut respond, setup).await else {
         return Ok(());
@@ -59,7 +60,8 @@ pub(super) async fn serve(
             return Ok(());
         }
     };
-    let (socket, target_addr) = prepared.into_http2();
+    let socket = prepared.into_http2();
+    let target_addr = socket.target_addr();
 
     let response = Response::builder()
         .status(StatusCode::OK)
@@ -76,6 +78,7 @@ pub(super) async fn serve(
     let mut decoder = DatagramCapsules::new(max_payload + 8);
 
     let client_to_target = async {
+        let mut packet = Vec::new();
         while let Some(chunk) = body.data().await {
             let chunk = chunk?;
             let datagrams = decoder.decode(&chunk)?;
@@ -90,7 +93,7 @@ pub(super) async fn serve(
                 if udp_payload.len() > max_payload {
                     anyhow::bail!("UDP payload exceeds configured HTTP/2 datagram limit");
                 }
-                let written = socket.send(udp_payload).await?;
+                let written = socket.send(udp_payload, &mut packet).await?;
                 if written != udp_payload.len() {
                     anyhow::bail!("target UDP socket accepted a partial datagram");
                 }
@@ -106,7 +109,7 @@ pub(super) async fn serve(
     let target_to_client = async {
         // One extra byte detects a datagram larger than the configured limit;
         // never forward a silently truncated prefix.
-        let mut recv = vec![0_u8; max_payload + 1];
+        let mut recv = vec![0_u8; socket.recv_buffer_size(max_payload)];
         loop {
             let mut read = socket.recv(&mut recv).await?;
             let mut capsules = Vec::new();
@@ -150,6 +153,7 @@ pub(super) async fn serve(
         Idle,
     }
     let completion = tokio::select! {
+        error = socket.closed() => Completion::Target(Err(error.into())),
         result = client_to_target => Completion::Client(result),
         result = target_to_client => Completion::Target(result),
         _ = wait_until_idle(Arc::clone(&activity), idle_timeout) => Completion::Idle,

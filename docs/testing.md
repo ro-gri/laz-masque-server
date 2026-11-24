@@ -448,3 +448,18 @@ that, and all three were hit while qualifying this feature:
 - Tag only the commit that passed these checks.
 
 Tags containing a hyphen are published as GitHub pre-releases.
+
+## SOCKS5 outbound routing
+
+Run `cargo test --lib outbound`, the `socks5` tests in both HTTP integration
+suites, and `cargo test --test check_config`. See [Outbound routing](outbound-routing.md)
+for coverage, resource limits and the benchmark/deployment gate.
+
+### DIRECT-only local control
+
+`cargo test --lib outbound` covers range snapshots across reload, active
+TCP/UDP survival, failed file validation, and retention of startup credentials.
+`cargo test --lib runtime_status` covers evidence ordering against a concurrent
+credential reload. `cargo test --test check_config status_compares` exercises
+the real CLI/socket command, unchanged/error results, startup-path pinning,
+independence from malformed TOML, and unchanged pending TLS/Basic edits.

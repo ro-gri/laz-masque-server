@@ -7,6 +7,25 @@ pre-1.0.
 
 ## Unreleased
 
+### Changed
+
+- Size SOCKS5 UDP receive buffers by the configured upstream packet limit on
+  H2 and H3, preserving truncation detection and portable single-packet reads.
+
+### Added
+
+- Add `reload-direct-cidrs` over the private local control socket to apply only
+  the startup DIRECT CIDR file without restarting or changing active tunnels.
+  Reject invalid files atomically and retain setup snapshots across DNS retries.
+
+- Route CONNECT and CONNECT-UDP destinations by IP/CIDR through DIRECT or a
+  local SOCKS5 upstream on HTTP/2 and HTTP/3. Preserve target ACLs, checked
+  DNS snapshots, bounded setup and fail-closed proxy behavior. Existing
+  configurations remain DIRECT; CONNECT-IP is independent.
+- Add upstream authentication, UDP association and packet-size limits,
+  restart-required tracking for external CIDR/password files, outbound
+  metrics, and SOCKS5 integration tests for both HTTP transports.
+
 ## 0.15.0 - 2026-11-20
 
 ### Added

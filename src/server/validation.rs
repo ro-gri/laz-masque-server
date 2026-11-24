@@ -21,6 +21,7 @@ fn quic_udp_buffer_limit(kernel_limit: Option<&str>) -> usize {
 /// and a real server start reject the same authentication, TLS, QUIC,
 /// target-policy, and address-pool mistakes.
 pub(super) struct ValidatedServerConfig {
+    pub(super) outbound: Arc<crate::outbound::Router>,
     pub(super) clients: ClientRegistry,
     pub(super) tls: Arc<tls::SharedTlsIdentity>,
     pub(super) listeners: Vec<ListenerPlan>,
@@ -249,6 +250,7 @@ pub fn validate_config(config: &ServerConfig) -> anyhow::Result<Vec<ResolvedList
 pub(super) fn validate_server_config(
     config: &ServerConfig,
 ) -> anyhow::Result<ValidatedServerConfig> {
+    let outbound = Arc::new(crate::outbound::Router::load(&config.outbound)?);
     let listeners = plan_listeners(config)?;
     let any_client_cert = any_client_cert_listener(config);
 
@@ -596,6 +598,7 @@ pub(super) fn validate_server_config(
         .map(|plan| plan.listener.shards)
         .sum();
     Ok(ValidatedServerConfig {
+        outbound,
         clients,
         tls,
         listeners,

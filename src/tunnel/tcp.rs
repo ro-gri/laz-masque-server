@@ -546,6 +546,7 @@ impl Drop for TcpTunnel {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_tcp_connect(
     connection_index: u64,
     stream_id: u64,
@@ -554,9 +555,10 @@ pub(crate) fn spawn_tcp_connect(
     timeout: Duration,
     event_tx: mpsc::Sender<TcpRelayEvent>,
     resolver: TargetResolver,
+    outbound: Arc<crate::outbound::Router>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let result = resolve_and_connect(target, &policy, timeout, &resolver).await;
+        let result = resolve_and_connect(target, &policy, timeout, &resolver, outbound).await;
         let _ = event_tx
             .send(TcpRelayEvent::ConnectResult {
                 connection_index,
@@ -572,14 +574,26 @@ pub(crate) async fn resolve_and_connect(
     policy: &TargetPolicy,
     timeout: Duration,
     resolver: &TargetResolver,
+    outbound: Arc<crate::outbound::Router>,
 ) -> Result<(TcpStream, SocketAddr), TcpSetupFailure> {
     let deadline = tokio::time::Instant::now() + timeout;
+    let routes = outbound.snapshot();
     let resolved = resolve_allowed(&target.host, target.port, policy, deadline, resolver).await?;
-    let connected =
-        tokio::time::timeout_at(deadline, happy_eyeballs_connect(resolved.into_addresses()))
-            .await
-            .map_err(|_| TcpSetupFailure::timeout("DNS resolution or TCP connect"))?
-            .map_err(|error| TcpSetupFailure::connect("TCP", error))?;
+    let connected = tokio::time::timeout_at(
+        deadline,
+        happy_eyeballs_connect_with(
+            resolved.into_addresses(),
+            HAPPY_EYEBALLS_DELAY,
+            move |address| {
+                let outbound = Arc::clone(&outbound);
+                let routes = Arc::clone(&routes);
+                async move { outbound.connect_tcp_snapshot(address, &routes).await }
+            },
+        ),
+    )
+    .await
+    .map_err(|_| TcpSetupFailure::timeout("DNS resolution or TCP connect"))?
+    .map_err(|error| TcpSetupFailure::connect("TCP", error))?;
 
     let (stream, address) = connected;
     let _ = stream.set_nodelay(true);
@@ -589,15 +603,6 @@ pub(crate) async fn resolve_and_connect(
 /// RFC 8305-style stagger between address-family attempts. An immediate
 /// failure starts the next address without waiting for this delay.
 const HAPPY_EYEBALLS_DELAY: Duration = Duration::from_millis(250);
-
-async fn happy_eyeballs_connect(
-    addresses: Vec<SocketAddr>,
-) -> std::io::Result<(TcpStream, SocketAddr)> {
-    happy_eyeballs_connect_with(addresses, HAPPY_EYEBALLS_DELAY, |address| async move {
-        TcpStream::connect(address).await
-    })
-    .await
-}
 
 /// Race interleaved IPv6/IPv4 candidates while retaining a deterministic hook
 /// for dual-stack fallback tests.

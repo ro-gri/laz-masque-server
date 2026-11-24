@@ -27,7 +27,7 @@ struct Cli {
     #[arg(short, long, default_value = "masque.toml")]
     config: PathBuf,
 
-    /// Owner-only local socket for live configuration status. Its parent must be 0700.
+    /// Owner-only local socket for configuration status and DIRECT file reload. Its parent must be 0700.
     #[arg(long, default_value = "/run/masque/status.sock")]
     status_socket: PathBuf,
 
@@ -88,6 +88,8 @@ enum Command {
     },
     /// Summarize the local systemd service, configuration, TLS and last reload.
     Status,
+    /// Reload only the running server's DIRECT CIDR file through its private socket.
+    ReloadDirectCidrs,
     /// Validate the configuration without binding sockets or creating a TUN.
     CheckConfig,
     /// Validate the configuration and inspect CONNECT-IP host prerequisites.
@@ -442,6 +444,16 @@ fn enroll_client(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    if matches!(cli.command, Some(Command::ReloadDirectCidrs)) {
+        #[cfg(unix)]
+        {
+            println!("{}", masque::reload_direct_cidrs(&cli.status_socket).await?);
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        anyhow::bail!("local control requires Unix sockets");
+    }
 
     if matches!(cli.command, Some(Command::Status)) {
         return support::print_status(

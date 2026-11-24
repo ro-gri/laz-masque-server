@@ -1113,3 +1113,12 @@ a configuration defect rather than weakening validation.
 The installer does not overwrite an existing configuration. Compare it with
 the example shipped in every new release and add new fields deliberately; all
 fields currently have backward-compatible defaults.
+
+## Outbound routing
+
+CONNECT and CONNECT-UDP can select DIRECT or a local SOCKS5 upstream by IP/CIDR.
+See [Outbound routing](outbound-routing.md) for configuration, DNS semantics,
+limits and the supported SOCKS5 contract. The default remains DIRECT; changes require
+restart, except CIDR file contents: `reload-direct-cidrs` applies those alone
+through the owner-only local socket. Upstream-password changes still require
+a restart. See the routing guide for command results and snapshot semantics.

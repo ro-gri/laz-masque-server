@@ -58,6 +58,7 @@ impl Shard {
                 Duration::from_secs(self.config.tcp_proxy.connect_timeout_secs),
                 self.tcp_event_tx.clone(),
                 client.resolver.clone(),
+                Arc::clone(&self.shared.outbound),
             );
             if let Some(pending) = client.pending_tcp_tunnels.get_mut(&stream_id) {
                 pending.start_connect(connect_task);
@@ -102,6 +103,7 @@ impl Shard {
                 target_datagram_size,
                 self.udp_setup_tx.clone(),
                 client.resolver.clone(),
+                Arc::clone(&self.shared.outbound),
             );
             if let Some(pending) = client.pending_udp_tunnels.get_mut(&stream_id) {
                 pending.start_setup(setup_task);
@@ -478,20 +480,72 @@ impl Shard {
         let header = pending.header();
         let early_datagrams = pending.take_early_datagrams();
         drop(pending);
-        let (send_socket, socket, target_addr, target_udp_gso) = prepared.into_http3();
+        let (send_socket, socket, target_addr, target_udp_gso, association) = prepared.into_http3();
+        let recv_association = association.clone();
         let recv_socket = Arc::clone(&socket);
         let response_tx = self.udp_response_tx.clone();
         let capsule_transport = !client.native_datagrams();
         let target_datagram_size = self.max_datagram_size.clamp(1, MAX_DATAGRAM_SIZE);
         let recv_task = tokio::spawn(async move {
-            if capsule_transport {
-                // Large reliable fallback payloads use one receive buffer and
-                // one packet per queued message, keeping memory independent of
-                // the native path's Linux batch size.
-                let mut buffer = vec![0; capsules::MAX_UDP_PAYLOAD + 1];
+            let receive = async {
+                if capsule_transport || recv_association.is_some() {
+                    // Large reliable fallback payloads use one receive buffer and
+                    // one packet per queued message, keeping memory independent of
+                    // the native path's Linux batch size.
+                    let payload_limit = if capsule_transport {
+                        capsules::MAX_UDP_PAYLOAD
+                    } else {
+                        target_datagram_size
+                    };
+                    let mut buffer = vec![
+                        0;
+                        crate::tunnel::udp::recv_buffer_size(
+                            recv_association.as_deref(),
+                            payload_limit,
+                        )
+                    ];
+                    loop {
+                        let len = match crate::tunnel::udp::recv_payload(
+                            &recv_socket,
+                            recv_association.as_deref(),
+                            &mut buffer,
+                        )
+                        .await
+                        {
+                            Ok(len) => len,
+                            Err(error) => {
+                                report_udp_receive_error(
+                                    &response_tx,
+                                    connection_index,
+                                    stream_id,
+                                    error,
+                                )
+                                .await;
+                                return;
+                            }
+                        };
+                        if len > payload_limit {
+                            continue;
+                        }
+                        if response_tx
+                            .send(UdpResponse {
+                                connection_index,
+                                stream_id,
+                                datagrams: Ok(vec![header.encode(&buffer[..len])]),
+                            })
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                }
+                // One `recvmmsg` per readiness instead of a `recvfrom` per
+                // datagram, and one channel send per batch.
+                let mut batch = TargetRecvBatch::new(target_datagram_size);
                 loop {
-                    let len = match recv_socket.recv(&mut buffer).await {
-                        Ok(len) => len,
+                    let received = match recv_target_batch(&recv_socket, &mut batch).await {
+                        Ok(received) => received,
                         Err(error) => {
                             report_udp_receive_error(
                                 &response_tx,
@@ -500,55 +554,34 @@ impl Shard {
                                 error,
                             )
                             .await;
-                            return;
+                            break;
                         }
                     };
-                    if len > capsules::MAX_UDP_PAYLOAD {
+
+                    let datagrams: Vec<Vec<u8>> = batch
+                        .datagrams(received)
+                        .map(|payload| header.encode(payload))
+                        .collect();
+                    if datagrams.is_empty() {
                         continue;
                     }
                     if response_tx
                         .send(UdpResponse {
                             connection_index,
                             stream_id,
-                            datagrams: Ok(vec![header.encode(&buffer[..len])]),
+                            datagrams: Ok(datagrams),
                         })
                         .await
                         .is_err()
                     {
-                        return;
-                    }
-                }
-            }
-            // One `recvmmsg` per readiness instead of a `recvfrom` per
-            // datagram, and one channel send per batch.
-            let mut batch = TargetRecvBatch::new(target_datagram_size);
-            loop {
-                let received = match recv_target_batch(&recv_socket, &mut batch).await {
-                    Ok(received) => received,
-                    Err(error) => {
-                        report_udp_receive_error(&response_tx, connection_index, stream_id, error)
-                            .await;
                         break;
                     }
-                };
-
-                let datagrams: Vec<Vec<u8>> = batch
-                    .datagrams(received)
-                    .map(|payload| header.encode(payload))
-                    .collect();
-                if datagrams.is_empty() {
-                    continue;
                 }
-                if response_tx
-                    .send(UdpResponse {
-                        connection_index,
-                        stream_id,
-                        datagrams: Ok(datagrams),
-                    })
-                    .await
-                    .is_err()
-                {
-                    break;
+            };
+            tokio::select! {
+                _ = receive => {},
+                error = crate::tunnel::udp::association_closed(recv_association.as_deref()) => {
+                    report_udp_receive_error(&response_tx, connection_index, stream_id, error).await;
                 }
             }
         });
@@ -559,6 +592,7 @@ impl Shard {
             socket,
             recv_task,
             target_udp_gso,
+            association,
         );
         info!(
             stream_id,
