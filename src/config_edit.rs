@@ -59,6 +59,7 @@ const SUGGESTED_PORT: u16 = 4443;
 /// a provisioning script.
 #[derive(Debug, Default)]
 pub struct AddListener {
+    pub id: Option<uuid::Uuid>,
     pub listen_addr: Option<SocketAddr>,
     pub transport: Option<ListenerTransport>,
     pub mode: Option<AuthMode>,
@@ -93,6 +94,7 @@ pub struct BasicListenerSelector {
 /// Add a user or replace one user's password hash.
 #[derive(Debug, Default)]
 pub struct BasicUserPassword {
+    pub id: Option<uuid::Uuid>,
     pub selector: BasicListenerSelector,
     pub username: String,
     pub password_hash: Option<String>,
@@ -162,10 +164,13 @@ pub fn add_listener(config_path: &Path, request: AddListener) -> anyhow::Result<
     // Credentials belong to one mode. Silently dropping them would leave an
     // operator believing a certificate listener also accepts a password.
     if mode == AuthMode::ClientCert
-        && (request.username.is_some() || request.password_hash.is_some() || request.password_stdin)
+        && (request.id.is_some()
+            || request.username.is_some()
+            || request.password_hash.is_some()
+            || request.password_stdin)
     {
         bail!(
-            "--username, --password-hash, and --password-stdin apply to --mode basic; \
+            "--id, --username, --password-hash, and --password-stdin apply to --mode basic; \
              a client_cert listener authenticates against the [[clients]] roster, so \
              enroll the client instead"
         );
@@ -199,9 +204,31 @@ pub fn add_listener(config_path: &Path, request: AddListener) -> anyhow::Result<
         );
     }
 
+    ensure!(
+        !(request.disable_auth && request.id.is_some()),
+        "--id requires enabled Basic authentication"
+    );
+    let http = config.authorization.backend == config::AuthBackend::Http;
+    if http {
+        ensure!(
+            request.id.is_none()
+                && request.username.is_none()
+                && request.password_hash.is_none()
+                && !request.password_stdin
+                && request.client_output.is_none(),
+            "backend = http forbids local credentials and client credential export in add-listener"
+        );
+    }
     let mut resolved_password: Option<ResolvedUserPassword> = None;
-    let auth = if request.disable_auth {
+    let auth = if http {
         AuthSection {
+            enabled: !request.disable_auth,
+            mode,
+            ..Default::default()
+        }
+    } else if request.disable_auth {
+        AuthSection {
+            id: uuid::Uuid::nil(),
             enabled: false,
             mode,
             stealth: false,
@@ -212,6 +239,7 @@ pub fn add_listener(config_path: &Path, request: AddListener) -> anyhow::Result<
     } else {
         match mode {
             AuthMode::ClientCert => AuthSection {
+                id: uuid::Uuid::nil(),
                 enabled: true,
                 mode,
                 stealth: false,
@@ -233,12 +261,14 @@ pub fn add_listener(config_path: &Path, request: AddListener) -> anyhow::Result<
                 let password_hash = resolved.password_hash.clone();
                 resolved_password = Some(resolved);
                 AuthSection {
+                    id: uuid::Uuid::nil(),
                     enabled: true,
                     mode,
                     stealth: false,
                     username: String::new(),
                     password_hash: String::new(),
                     users: vec![BasicUser {
+                        id: request.id.unwrap_or_else(uuid::Uuid::new_v4),
                         username,
                         password_hash,
                     }],
@@ -360,6 +390,14 @@ pub fn add_listener(config_path: &Path, request: AddListener) -> anyhow::Result<
     Ok(())
 }
 
+fn require_file_authorization(config: &ServerConfig) -> anyhow::Result<()> {
+    ensure!(
+        config.authorization.backend == config::AuthBackend::File,
+        "user management is unavailable with backend = http; manage credentials in the authorization server"
+    );
+    Ok(())
+}
+
 /// Print Basic usernames without exposing password hashes.
 pub fn list_basic_users(config_path: &Path, selector: BasicListenerSelector) -> anyhow::Result<()> {
     let text = std::fs::read_to_string(config_path)
@@ -368,6 +406,7 @@ pub fn list_basic_users(config_path: &Path, selector: BasicListenerSelector) -> 
         .with_context(|| format!("failed to parse {}", config_path.display()))?;
     validate_config(&config)?;
 
+    require_file_authorization(&config)?;
     let indices = if selector.listen_addr.is_none() && selector.transport.is_none() {
         config
             .listeners
@@ -389,8 +428,8 @@ pub fn list_basic_users(config_path: &Path, selector: BasicListenerSelector) -> 
             listener.listen_addr,
             listener.transport.as_str()
         );
-        for (username, _) in effective_basic_users(&listener.auth) {
-            println!("  {username}");
+        for (id, username, _) in effective_basic_users(&listener.auth) {
+            println!("  {id}  {username}");
         }
     }
     Ok(())
@@ -457,6 +496,7 @@ fn edit_basic_user(config_path: &Path, edit: UserEdit) -> anyhow::Result<()> {
             config_path.display()
         )
     })?;
+    require_file_authorization(&config)?;
     let listener_index = select_basic_listener(&config, edit.selector())?;
     let client_output = match &edit {
         UserEdit::Add(request) => request.client_output.as_ref(),
@@ -516,8 +556,9 @@ fn edit_basic_user(config_path: &Path, edit: UserEdit) -> anyhow::Result<()> {
         .map(|resolved| resolved.password_hash.clone());
 
     match &edit {
-        UserEdit::Add(_) => {
+        UserEdit::Add(request) => {
             expected_auth.users.push(BasicUser {
+                id: request.id.unwrap_or_else(uuid::Uuid::new_v4),
                 username: username.clone(),
                 password_hash: replacement_hash
                     .as_ref()
@@ -548,6 +589,7 @@ fn edit_basic_user(config_path: &Path, edit: UserEdit) -> anyhow::Result<()> {
     match &edit {
         UserEdit::Add(_) => {
             users.push(basic_user_table(
+                expected_auth.users.last().expect("added user").id,
                 &username,
                 replacement_hash
                     .as_deref()
@@ -739,13 +781,13 @@ fn select_basic_listener(
     }
 }
 
-fn effective_basic_users(auth: &AuthSection) -> Vec<(&str, &str)> {
+fn effective_basic_users(auth: &AuthSection) -> Vec<(uuid::Uuid, &str, &str)> {
     if auth.users.is_empty() {
-        vec![(auth.username.as_str(), auth.password_hash.as_str())]
+        vec![(auth.id, auth.username.as_str(), auth.password_hash.as_str())]
     } else {
         auth.users
             .iter()
-            .map(|user| (user.username.as_str(), user.password_hash.as_str()))
+            .map(|user| (user.id, user.username.as_str(), user.password_hash.as_str()))
             .collect()
     }
 }
@@ -753,6 +795,7 @@ fn effective_basic_users(auth: &AuthSection) -> Vec<(&str, &str)> {
 fn migrate_legacy_basic_user(auth: &mut AuthSection) {
     if auth.users.is_empty() {
         auth.users.push(BasicUser {
+            id: std::mem::take(&mut auth.id),
             username: std::mem::take(&mut auth.username),
             password_hash: std::mem::take(&mut auth.password_hash),
         });
@@ -773,6 +816,11 @@ fn editable_auth_table(
 }
 
 fn canonical_users_table(auth: &mut Table) -> anyhow::Result<&mut ArrayOfTables> {
+    let legacy_id = auth
+        .get("id")
+        .and_then(Item::as_str)
+        .map(str::parse::<uuid::Uuid>)
+        .transpose()?;
     let legacy_username = auth
         .get("username")
         .and_then(Item::as_str)
@@ -792,7 +840,12 @@ fn canonical_users_table(auth: &mut Table) -> anyhow::Result<&mut ArrayOfTables>
 
     match (legacy_username, legacy_hash) {
         (Some(username), Some(password_hash)) => {
-            users.push(basic_user_table(&username, &password_hash));
+            users.push(basic_user_table(
+                legacy_id.context("legacy Basic credential requires id")?,
+                &username,
+                &password_hash,
+            ));
+            auth.remove("id");
             auth.remove("username");
             auth.remove("password_hash");
         }
@@ -805,8 +858,9 @@ fn canonical_users_table(auth: &mut Table) -> anyhow::Result<&mut ArrayOfTables>
         .expect("users table was created above"))
 }
 
-fn basic_user_table(username: &str, password_hash: &str) -> Table {
+fn basic_user_table(id: uuid::Uuid, username: &str, password_hash: &str) -> Table {
     let mut table = Table::new();
+    table["id"] = value(id.to_string());
     table["username"] = value(username);
     table["password_hash"] = value(password_hash);
     table
@@ -916,8 +970,16 @@ pub fn listener_toml_block(listener: &ListenerSection) -> String {
     match listener.auth.mode {
         AuthMode::Basic => {
             block.push_str("mode = \"basic\"\n");
-            for (username, password_hash) in effective_basic_users(&listener.auth) {
+            if listener.auth.users.is_empty()
+                && listener.auth.id.is_nil()
+                && listener.auth.username.is_empty()
+                && listener.auth.password_hash.is_empty()
+            {
+                return block;
+            }
+            for (id, username, password_hash) in effective_basic_users(&listener.auth) {
                 block.push_str("\n[[listeners.auth.users]]\n");
+                block.push_str(&format!("id = {}\n", toml_string(&id.to_string())));
                 block.push_str(&format!("username = {}\n", toml_string(username)));
                 block.push_str(&format!("password_hash = {}\n", toml_string(password_hash)));
             }
@@ -1520,6 +1582,7 @@ listen_addr = "0.0.0.0:443"
 shards = 1
 
 [listeners.auth]
+id = "34bc24bf-469d-553b-9f82-ac12bbb4c6e1"
 enabled = true
 mode = "basic"
 username = "alice"
@@ -1535,6 +1598,7 @@ password_hash = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$hash"
             tcp_targets: None,
             udp_targets: None,
             auth: AuthSection {
+                id: uuid::Uuid::nil(),
                 enabled: true,
                 mode: AuthMode::ClientCert,
                 stealth: false,
@@ -1589,12 +1653,14 @@ password_hash = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$hash"
             tcp_targets: None,
             udp_targets: None,
             auth: AuthSection {
+                id: uuid::Uuid::nil(),
                 enabled: true,
                 mode: AuthMode::Basic,
                 stealth: false,
                 username: String::new(),
                 password_hash: String::new(),
                 users: vec![BasicUser {
+                    id: uuid::Uuid::new_v4(),
                     username: "bob".into(),
                     password_hash: "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$hash".into(),
                 }],
@@ -1625,6 +1691,7 @@ password_hash = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$hash"
             tcp_targets: None,
             udp_targets: None,
             auth: AuthSection {
+                id: uuid::Uuid::nil(),
                 enabled: false,
                 mode: AuthMode::Basic,
                 stealth: false,

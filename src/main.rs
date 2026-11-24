@@ -110,6 +110,9 @@ enum Command {
     /// configuration for the client. Nothing is written to the server config
     /// automatically: enrolling a client is a deliberate act.
     EnrollClient {
+        /// Stable credential UUID; generated when omitted.
+        #[arg(long)]
+        id: Option<uuid::Uuid>,
         /// Label for this client, used in the server's logs.
         #[arg(long)]
         name: String,
@@ -149,6 +152,9 @@ enum Command {
     /// reloads TLS material and active Basic/certificate credentials, not
     /// listeners.
     AddListener {
+        /// Stable credential UUID; generated when omitted.
+        #[arg(long)]
+        id: Option<uuid::Uuid>,
         /// Address and port for the new socket, for example `0.0.0.0:4443`.
         #[arg(long)]
         listen_addr: Option<SocketAddr>,
@@ -261,6 +267,9 @@ enum Command {
     },
     /// Add another username and password to one Basic listener.
     AddUser {
+        /// Stable credential UUID; generated when omitted.
+        #[arg(long)]
+        id: Option<uuid::Uuid>,
         #[arg(long)]
         username: String,
 
@@ -394,6 +403,7 @@ fn auth_label(auth: &config::AuthSection) -> &'static str {
 
 /// Generate and print one client enrollment.
 fn enroll_client(
+    id: uuid::Uuid,
     cert_path: &Path,
     name: &str,
     endpoint: SocketAddr,
@@ -401,6 +411,7 @@ fn enroll_client(
     ipv6: Option<Ipv6Addr>,
     out: Option<PathBuf>,
 ) -> anyhow::Result<()> {
+    anyhow::ensure!(!id.is_nil(), "credential id must be a non-nil UUID");
     let pair = enroll::generate_client_key()?;
     let server_key = enroll::server_public_key_pem(cert_path)?;
 
@@ -415,7 +426,7 @@ fn enroll_client(
     println!("# Add to the server config, then reload or restart the server:\n");
     print!(
         "{}",
-        enroll::clients_toml_block(name, &pair.public_key_b64, ipv4, ipv6)
+        enroll::clients_toml_block(id, name, &pair.public_key_b64, ipv4, ipv6)
     );
 
     match out {
@@ -560,6 +571,7 @@ async fn main() -> anyhow::Result<()> {
     // itself, and validates it exactly as the service will read it rather than
     // with this invocation's --cert/--key overrides applied.
     if let Some(Command::AddListener {
+        id,
         listen_addr,
         transport,
         mode,
@@ -594,6 +606,7 @@ async fn main() -> anyhow::Result<()> {
         return config_edit::add_listener(
             &cli.config,
             config_edit::AddListener {
+                id: *id,
                 listen_addr: *listen_addr,
                 transport: transport.map(Into::into),
                 mode: mode.map(Into::into),
@@ -625,6 +638,7 @@ async fn main() -> anyhow::Result<()> {
         );
     }
     if let Some(Command::AddUser {
+        id,
         username,
         listen_addr,
         transport,
@@ -651,6 +665,7 @@ async fn main() -> anyhow::Result<()> {
         return config_edit::add_basic_user(
             &cli.config,
             config_edit::BasicUserPassword {
+                id: *id,
                 selector: config_edit::BasicListenerSelector {
                     listen_addr: *listen_addr,
                     transport: transport.map(Into::into),
@@ -673,6 +688,7 @@ async fn main() -> anyhow::Result<()> {
         return config_edit::set_basic_user_password(
             &cli.config,
             config_edit::BasicUserPassword {
+                id: None,
                 selector: config_edit::BasicListenerSelector {
                     listen_addr: *listen_addr,
                     transport: transport.map(Into::into),
@@ -718,6 +734,7 @@ async fn main() -> anyhow::Result<()> {
     // Enrollment only needs the server certificate, so it runs off the same
     // config the server would use rather than asking for the path again.
     if let Some(Command::EnrollClient {
+        id,
         name,
         endpoint,
         ipv4,
@@ -725,7 +742,19 @@ async fn main() -> anyhow::Result<()> {
         out,
     }) = cli.command
     {
-        return enroll_client(&cfg.tls.cert_path, &name, endpoint, ipv4, ipv6, out);
+        anyhow::ensure!(
+            cfg.authorization.backend != masque::config::AuthBackend::Http,
+            "enroll-client is unavailable with backend = http; issue and register credentials through the authorization server/CA"
+        );
+        return enroll_client(
+            id.unwrap_or_else(uuid::Uuid::new_v4),
+            &cfg.tls.cert_path,
+            &name,
+            endpoint,
+            ipv4,
+            ipv6,
+            out,
+        );
     }
 
     if matches!(cli.command, Some(Command::CheckConfig)) {

@@ -297,6 +297,7 @@ enabled = true
 mode = "basic"
 
 [[listeners.auth.users]]
+id = "743cdaf8-8415-5dab-b0cc-791cf512ddde"
 username = "test"
 password_hash = "\$argon2id\$v=19\$m=19456,t=2,p=1\$1xNVXhqKU7jJ6cqTBJKphQ\$GXXAINVTW1qhloFtN1IR8lSr7pI7QEY79fq4K6d8scQ"
 EOF
@@ -315,6 +316,7 @@ enabled = true
 mode = "basic"
 
 [[listeners.auth.users]]
+id = "648efac8-a096-5540-9e4f-7a4eb1514db9"
 username = "test"
 password_hash = "\$argon2id\$v=19\$m=19456,t=2,p=1\$1xNVXhqKU7jJ6cqTBJKphQ\$GXXAINVTW1qhloFtN1IR8lSr7pI7QEY79fq4K6d8scQ"
 EOF

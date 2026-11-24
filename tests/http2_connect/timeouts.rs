@@ -570,6 +570,7 @@ async fn first_basic_auth_deadline_releases_active_unauthenticated_connection() 
     let files = TestFiles::new();
     let mut config = http2_config(&files);
     config.listeners[0].auth.enabled = true;
+    config.listeners[0].auth.id = masque::config::Uuid::new_v4();
     config.listeners[0].auth.username = "test".into();
     config.listeners[0].auth.password_hash = masque::auth::hash_password(b"password").unwrap();
     config.server.idle_timeout_secs = IDLE_SECS;

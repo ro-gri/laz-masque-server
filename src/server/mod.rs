@@ -258,6 +258,12 @@ fn config_reload_settings(
     config_path.map(|path| ConfigReload {
         path,
         tls: config.tls.clone(),
+        backend: config.authorization.backend,
+        client_ca_path: config
+            .authorization
+            .http
+            .as_ref()
+            .and_then(|http| http.client_ca_path.clone()),
         client_cert_enabled: any_client_cert_listener(config),
         ip_proxy_enabled: config.ip_proxy.enabled,
         listeners: config
@@ -382,14 +388,15 @@ impl Server {
         } = validate_server_config(&config)?;
 
         let basic_shards = basic_shard_count(&listeners);
+        let http_auth = crate::auth_http::shared(&config.authorization)?;
         let basic_auth = listeners
             .iter()
             .map(|plan| {
                 plan.listener
                     .auth
-                    .basic_enabled()
+                    .request_auth_enabled(&config.authorization)
                     .then(|| {
-                        BasicAuthenticator::from_section(&plan.listener.auth)
+                        BasicAuthenticator::with_http(&plan.listener.auth, http_auth.clone())
                             .map(SharedBasicAuthenticator::new)
                             .map(Arc::new)
                     })
@@ -996,6 +1003,7 @@ fn reload_configuration(shared: &Shared) -> anyhow::Result<ReloadOutcome> {
     let config = crate::config::parse_toml(&text)
         .with_context(|| format!("failed to parse {}", reload.path.display()))?;
 
+    crate::credential_id::validate(&config)?;
     if config.listeners.len() != reload.listeners.len() {
         anyhow::bail!(
             "refusing to reload: listener count changed from {} to {}; adding or removing a \
@@ -1004,6 +1012,17 @@ fn reload_configuration(shared: &Shared) -> anyhow::Result<ReloadOutcome> {
             config.listeners.len()
         );
     }
+    anyhow::ensure!(
+        reload.backend == config.authorization.backend
+            && reload.client_ca_path.as_deref()
+                == config
+                    .authorization
+                    .http
+                    .as_ref()
+                    .and_then(|http| http.client_ca_path.as_deref()),
+        "refusing to reload: authorization backend or client CA path changed; restart required"
+    );
+    let http_auth = crate::auth_http::shared(&config.authorization)?;
     let mut basic_auth = Vec::with_capacity(config.listeners.len());
     for (index, (startup, current)) in reload
         .listeners
@@ -1024,12 +1043,13 @@ fn reload_configuration(shared: &Shared) -> anyhow::Result<ReloadOutcome> {
             );
         }
         basic_auth.push(
-            (startup.auth == ReloadAuthKind::Basic)
-                .then(|| {
-                    BasicAuthenticator::from_section(&current.auth)
-                        .with_context(|| format!("listener {} Basic credentials", index + 1))
-                })
-                .transpose()?,
+            (startup.auth == ReloadAuthKind::Basic
+                || current.auth.http_enabled(&config.authorization))
+            .then(|| {
+                BasicAuthenticator::with_http(&current.auth, http_auth.clone())
+                    .with_context(|| format!("listener {} Basic credentials", index + 1))
+            })
+            .transpose()?,
         );
     }
     let tls_identity = shared
@@ -1186,6 +1206,7 @@ fn build_quic_config(
     config: &ServerConfig,
     max_datagram_size: usize,
     client_certs: Option<Arc<SharedRoster>>,
+    http_client_ca: Option<&std::path::Path>,
     tls_identity: Arc<tls::SharedTlsIdentity>,
 ) -> anyhow::Result<quiche::Config> {
     // quiche's file-loading API fixes one identity into the context. Building
@@ -1200,6 +1221,9 @@ fn build_quic_config(
     // relying on quiche's current default.
     tls::disable_early_data(&mut builder);
     tls::configure_dynamic_identity(&mut builder, tls_identity)?;
+    if let Some(ca) = http_client_ca {
+        crate::client_identity::configure_ca_cert_verification(&mut builder, ca)?;
+    }
     if let Some(roster) = client_certs {
         // quiche's normal peer verification cannot express the self-signed,
         // public-key roster, so install the
@@ -1478,6 +1502,8 @@ struct PacketOutput<'a> {
 
 /// Immutable facts that govern SIGHUP reloads.
 struct ConfigReload {
+    backend: crate::config::AuthBackend,
+    client_ca_path: Option<std::path::PathBuf>,
     path: std::path::PathBuf,
     /// Effective startup paths. ACME may replace their contents or symlink
     /// targets, but changing the paths themselves still needs a restart so CLI
@@ -1805,7 +1831,10 @@ impl Shard {
             "listening"
         );
 
-        let client_certs = if listener.auth.client_cert_enabled() {
+        let client_certs = if listener
+            .auth
+            .file_client_cert_enabled(&config.authorization)
+        {
             Some(Arc::clone(&shared.clients))
         } else {
             None
@@ -1815,6 +1844,7 @@ impl Shard {
             &config,
             max_datagram_size,
             client_certs.as_ref().map(Arc::clone),
+            listener.auth.http_client_ca(&config.authorization),
             Arc::clone(&shared.tls),
         )?;
         let h3_config = build_h3_config()?;
@@ -2362,6 +2392,7 @@ mod tests {
 
     fn invalid_roster_entry() -> ClientEntry {
         ClientEntry {
+            id: uuid::Uuid::new_v4(),
             name: "unused".into(),
             public_key: "not-a-public-key".into(),
             ipv4: Some("not-an-ip".into()),
@@ -2387,6 +2418,7 @@ mod tests {
             tcp_targets: None,
             udp_targets: None,
             auth: AuthSection {
+                id: uuid::Uuid::new_v4(),
                 enabled: true,
                 mode,
                 stealth: false,

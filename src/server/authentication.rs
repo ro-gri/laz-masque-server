@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tracing::warn;
 
-use crate::auth::{BasicCredential, PasswordVerification};
+use crate::auth::{PasswordVerification, VerificationCredential};
 use crate::connection::AwaitingAuth;
 use crate::metrics::ShardMetrics;
 use crate::tunnel::tcp::PendingTcpTunnel;
@@ -26,7 +26,7 @@ pub(super) struct AuthOutcome {
 /// slots but never a CPU permit or blocking thread. Once work starts, its
 /// admission guards live until Argon2 actually finishes, even after a reset.
 pub(super) async fn verify_basic_password(
-    credential: Arc<BasicCredential>,
+    credential: impl Into<VerificationCredential>,
     password: zeroize::Zeroizing<Vec<u8>>,
     permits: Arc<tokio::sync::Semaphore>,
     metrics: Arc<ShardMetrics>,
@@ -41,6 +41,21 @@ pub(super) async fn verify_basic_password(
     }
     let _cancellation = CancelOnDrop(Arc::clone(&cancelled));
     let pending = metrics.auth_pending_guard();
+    let credential = match credential.into() {
+        VerificationCredential::File(credential) => credential,
+        VerificationCredential::Http(attempt) => {
+            let _held = held;
+            if cancelled.load(Ordering::Acquire) {
+                return None;
+            }
+            let authorized = attempt.verify().await.is_some();
+            if cancelled.load(Ordering::Acquire) {
+                return None;
+            }
+            record_result(&metrics, authorized);
+            return Some(authorized);
+        }
+    };
     loop {
         if cancelled.load(Ordering::Acquire) {
             return None;
@@ -269,6 +284,7 @@ impl Shard {
             // and observes the FIN retained by QUIC. A reset, unlike FIN,
             // removes awaiting_auth above and never reaches this point.
             let request_context = RequestContext {
+                peer_key: client.external_certificate_key.as_deref(),
                 metrics: &self.metrics,
                 config: &self.config,
                 auth: self.auth.as_deref(),
@@ -330,7 +346,7 @@ impl Shard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::{AuthPrecheck, BasicAuthenticator};
+    use crate::auth::{AuthPrecheck, BasicAuthenticator, BasicCredential};
     use crate::metrics::Metrics;
     use base64::Engine as _;
     use std::time::Duration;
@@ -345,7 +361,10 @@ mod tests {
         else {
             panic!("cold credentials");
         };
-        credential
+        match credential {
+            VerificationCredential::File(credential) => credential,
+            _ => panic!("file credential"),
+        }
     }
 
     fn counter(metrics: &Metrics, name: &str) -> u64 {

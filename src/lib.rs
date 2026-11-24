@@ -1,11 +1,13 @@
 pub mod address_pool;
 mod admission;
 pub mod auth;
+mod auth_http;
 pub mod capsule;
 pub mod client_identity;
 pub mod config;
 pub mod config_edit;
 pub mod connection;
+mod credential_id;
 pub mod datagram;
 pub mod enroll;
 pub mod error;

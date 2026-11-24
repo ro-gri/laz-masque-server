@@ -528,6 +528,7 @@ mod tests {
         let mut config = ServerConfig::default();
         config.ip_proxy.enabled = false;
         config.clients.push(crate::config::ClientEntry {
+            id: uuid::Uuid::new_v4(),
             name: "PRIVATE-CLIENT-LABEL".into(),
             public_key: "PRIVATE-PUBLIC-KEY".into(),
             ipv4: Some("10.89.0.99".into()),
@@ -538,6 +539,7 @@ mod tests {
         config.listeners[0].auth.username.clear();
         config.listeners[0].auth.password_hash.clear();
         config.listeners[0].auth.users = vec![BasicUser {
+            id: uuid::Uuid::new_v4(),
             username: "PRIVATE-USERNAME".into(),
             password_hash: "PRIVATE-PASSWORD-HASH".into(),
         }];

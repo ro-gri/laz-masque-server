@@ -1,5 +1,7 @@
 // Configuration loading — TOML file + CLI overrides.
 
+pub use uuid::Uuid;
+
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -8,6 +10,8 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ServerConfig {
+    #[serde(default)]
+    pub authorization: AuthorizationSection,
     #[serde(default)]
     pub server: ServerSection,
     #[serde(default)]
@@ -32,6 +36,7 @@ pub struct ServerConfig {
     /// Only consulted when a listener uses `auth.mode = "client_cert"`.
     /// Written as repeated `[[clients]]` tables.
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub clients: Vec<ClientEntry>,
     /// Every socket this server listens on, written as repeated `[[listeners]]`
     /// tables.
@@ -131,9 +136,53 @@ impl ListenerTransport {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthBackend {
+    #[default]
+    File,
+    Http,
+}
+
+/// One authorization source for the entire server.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct AuthorizationSection {
+    pub backend: AuthBackend,
+    pub http: Option<HttpAuthSection>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct HttpAuthSection {
+    pub url: String,
+    pub timeout_ms: u64,
+    pub cache_ttl_secs: u64,
+    pub cache_max_entries: usize,
+    pub max_in_flight: usize,
+    /// Trust anchors for HTTP-backed client certificates; loaded at startup.
+    pub client_ca_path: Option<PathBuf>,
+}
+
+impl Default for HttpAuthSection {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            timeout_ms: 1000,
+            cache_ttl_secs: 300,
+            cache_max_entries: 4096,
+            max_in_flight: 8,
+            client_ca_path: None,
+        }
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct AuthSection {
+    /// Stable credential identity; nil/missing IDs are rejected during validation.
+    #[serde(skip_serializing_if = "Uuid::is_nil")]
+    pub id: Uuid,
     /// Master switch. `false` disables authentication whatever `mode` says.
     pub enabled: bool,
     pub mode: AuthMode,
@@ -141,14 +190,16 @@ pub struct AuthSection {
     /// failures always use an empty 404; clients must send credentials on
     /// their first CONNECT request.
     pub stealth: bool,
-    /// Legacy single-user spelling retained so existing configurations keep
-    /// working. New configurations should use repeated
+    /// Legacy single-user spelling; requires a companion `id`.
+    /// New configurations should use repeated
     /// `[[listeners.auth.users]]` tables instead.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub username: String,
     /// Legacy companion to [`username`](Self::username).
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub password_hash: String,
     /// Basic credentials accepted by this listener.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub users: Vec<BasicUser>,
 }
 
@@ -156,6 +207,8 @@ pub struct AuthSection {
 #[derive(Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct BasicUser {
+    /// Stable credential identity; nil/missing IDs are rejected during validation.
+    pub id: Uuid,
     pub username: String,
     pub password_hash: String,
 }
@@ -163,6 +216,7 @@ pub struct BasicUser {
 impl std::fmt::Debug for BasicUser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BasicUser")
+            .field("id", &self.id)
             .field("username", &self.username)
             .field(
                 "password_hash",
@@ -182,6 +236,7 @@ impl std::fmt::Debug for AuthSection {
             .field("enabled", &self.enabled)
             .field("mode", &self.mode)
             .field("stealth", &self.stealth_enabled())
+            .field("id", &self.id)
             .field("username", &self.username)
             .field(
                 "password_hash",
@@ -197,6 +252,29 @@ impl std::fmt::Debug for AuthSection {
 }
 
 impl AuthSection {
+    pub fn http_enabled(&self, authorization: &AuthorizationSection) -> bool {
+        self.enabled && authorization.backend == AuthBackend::Http
+    }
+    pub fn request_auth_enabled(&self, authorization: &AuthorizationSection) -> bool {
+        self.basic_enabled() || self.http_enabled(authorization)
+    }
+    pub fn file_client_cert_enabled(&self, authorization: &AuthorizationSection) -> bool {
+        self.client_cert_enabled() && authorization.backend == AuthBackend::File
+    }
+    pub fn http_client_ca<'a>(
+        &self,
+        authorization: &'a AuthorizationSection,
+    ) -> Option<&'a std::path::Path> {
+        if self.http_enabled(authorization) && self.client_cert_enabled() {
+            authorization
+                .http
+                .as_ref()
+                .and_then(|http| http.client_ca_path.as_deref())
+        } else {
+            None
+        }
+    }
+
     /// Whether Basic credentials are required on every CONNECT request.
     pub fn basic_enabled(&self) -> bool {
         self.enabled && self.mode == AuthMode::Basic
@@ -284,6 +362,8 @@ impl ResolvedListener {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct ClientEntry {
+    /// Stable credential identity; nil/missing IDs are rejected during validation.
+    pub id: Uuid,
     /// Label used in logs. Optional, but makes the logs readable.
     pub name: String,
     /// The client's ECDSA P-256 public key, as base64 SubjectPublicKeyInfo DER
@@ -451,6 +531,7 @@ pub struct ObservabilitySection {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
+            authorization: AuthorizationSection::default(),
             server: ServerSection::default(),
             outbound: OutboundSection::default(),
             tls: TlsSection::default(),
@@ -502,6 +583,7 @@ impl Default for TlsSection {
 impl Default for AuthSection {
     fn default() -> Self {
         Self {
+            id: Uuid::nil(),
             // Fail closed in Server::bind until an operator configures
             // credentials or explicitly opts out for a private test setup.
             enabled: true,
@@ -624,7 +706,34 @@ fn default_deny_targets() -> Vec<String> {
 
 /// Parse a TOML string into a [`ServerConfig`].
 pub fn parse_toml(toml_str: &str) -> Result<ServerConfig, toml::de::Error> {
-    toml::from_str(toml_str)
+    let config: ServerConfig = toml::from_str(toml_str)?;
+    if config.authorization.backend == AuthBackend::Http {
+        // Preserve the distinction between absent file settings and explicitly
+        // empty ones. This runs only on config load/reload, never on requests.
+        let raw: toml::Value = toml::from_str(toml_str)?;
+        if raw.get("clients").is_some() {
+            return Err(serde::de::Error::custom(
+                "invalid configuration: authorization.backend = http forbids clients",
+            ));
+        }
+        for listener in raw
+            .get("listeners")
+            .and_then(toml::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(auth) = listener.get("auth").and_then(toml::Value::as_table) {
+                for field in ["id", "username", "password_hash", "users"] {
+                    if auth.contains_key(field) {
+                        return Err(serde::de::Error::custom(format!(
+                            "invalid configuration: authorization.backend = http forbids listeners.auth.{field}, including empty values"
+                        )));
+                    }
+                }
+            }
+        }
+    }
+    Ok(config)
 }
 
 #[cfg(test)]
@@ -752,6 +861,7 @@ listen_addr = "127.0.0.1:9090"
 listen_addr = "127.0.0.1:8443"
 
 [listeners.auth]
+id = "89c49c36-74c2-5a68-974f-1bcdf38b1c7a"
 enabled = true
 username = "alice"
 password_hash = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA"
@@ -778,10 +888,12 @@ enabled = true
 mode = "basic"
 
 [[listeners.auth.users]]
+id = "679b0ec3-93b6-55f8-965a-21bb4dd6a5c7"
 username = "alice"
 password_hash = "$argon2id$v=19$m=19456,t=2,p=1$YWxpY2U$aGFzaDE"
 
 [[listeners.auth.users]]
+id = "5ce8f2b0-a5fa-5e9a-a088-d4c6c4b400f6"
 username = "bob"
 password_hash = "$argon2id$v=19$m=19456,t=2,p=1$Ym9i$aGFzaDI"
 "#;
@@ -809,12 +921,14 @@ enabled = true
 mode = "client_cert"
 
 [[clients]]
+id = "0f181bc3-b497-52c9-83c8-ce49cecac741"
 name = "laptop"
 public_key = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEdGVzdA=="
 ipv4 = "10.89.0.2"
 ipv6 = "fd00:abcd::2"
 
 [[clients]]
+id = "97ee74cf-73f1-5bc4-8e46-ccdf2ecebf44"
 name = "phone"
 public_key = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEb3RoZXI="
 "#;
@@ -867,6 +981,7 @@ public_key = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEb3RoZXI="
 listen_addr = "0.0.0.0:8443"
 
 [listeners.auth]
+id = "6dd950f2-f48f-5786-8254-12d8ff4ec2d7"
 enabled = true
 mode = "basic"
 username = "alice"
@@ -1167,6 +1282,7 @@ listen_addr = "0.0.0.0:443"
 shards = 1
 
 [listeners.auth]
+
 enabled = true
 mode = "basic"
 username = ""

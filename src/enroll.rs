@@ -164,12 +164,13 @@ pub fn basic_client_config_json(
 
 /// The `[[clients]]` block to append to the server's config file.
 pub fn clients_toml_block(
+    id: uuid::Uuid,
     name: &str,
     public_key_b64: &str,
     ipv4: Option<Ipv4Addr>,
     ipv6: Option<Ipv6Addr>,
 ) -> String {
-    let mut block = String::from("[[clients]]\n");
+    let mut block = format!("[[clients]]\nid = {}\n", toml_string(&id.to_string()));
     block.push_str(&format!("name = {}\n", toml_string(name)));
     block.push_str(&format!("public_key = {}\n", toml_string(public_key_b64)));
     if let Some(ipv4) = ipv4 {
@@ -279,6 +280,7 @@ mod tests {
     fn generated_public_key_is_accepted_by_the_roster_parser() {
         let pair = generate_client_key().unwrap();
         let entry = ClientEntry {
+            id: uuid::Uuid::new_v4(),
             name: "laptop".into(),
             public_key: pair.public_key_b64.clone(),
             ipv4: None,
@@ -314,7 +316,9 @@ mod tests {
     #[test]
     fn clients_block_parses_back_into_the_configured_roster() {
         let pair = generate_client_key().unwrap();
+        let id = uuid::Uuid::new_v4();
         let block = clients_toml_block(
+            id,
             "my laptop",
             &pair.public_key_b64,
             Some("10.89.0.2".parse().unwrap()),
@@ -323,6 +327,7 @@ mod tests {
 
         let parsed = parse_with_listener(&block);
         assert_eq!(parsed.clients.len(), 1);
+        assert_eq!(parsed.clients[0].id, id);
         assert_eq!(parsed.clients[0].name, "my laptop");
         assert_eq!(parsed.clients[0].public_key, pair.public_key_b64);
         assert_eq!(parsed.clients[0].ipv4.as_deref(), Some("10.89.0.2"));
@@ -333,7 +338,13 @@ mod tests {
     #[test]
     fn clients_block_omits_addresses_that_were_not_pinned() {
         let pair = generate_client_key().unwrap();
-        let block = clients_toml_block("phone", &pair.public_key_b64, None, None);
+        let block = clients_toml_block(
+            uuid::Uuid::new_v4(),
+            "phone",
+            &pair.public_key_b64,
+            None,
+            None,
+        );
         assert!(!block.contains("ipv4"));
         assert!(!block.contains("ipv6"));
 

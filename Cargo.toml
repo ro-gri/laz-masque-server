@@ -49,6 +49,9 @@ clap = { version = "4", features = ["derive"] }
 foreign-types = "0.5"
 h2 = "0.4.18"
 http = "1"
+http-body-util = "0.1.5"
+hyper = { version = "1.12.0", features = ["client", "http1"] }
+hyper-util = { version = "0.1.21", features = ["client", "client-legacy", "http1", "tokio"] }
 ipnet = "2"
 quiche = "0.30.0"
 ring = "0.17"
@@ -63,6 +66,7 @@ toml_edit = "0.25"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tun-rs = { version = "2", features = ["async_tokio"] }
+uuid = { version = "1.26.1", features = ["serde", "v4"] }
 zeroize = "1"
 
 # Linux uses this for the packet path (recvmmsg, GSO/GRO, TUN offload); every

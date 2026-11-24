@@ -236,6 +236,7 @@ pub struct ClientConnection {
     /// life of the connection, so re-parsing the certificate per request would
     /// be wasted work.
     pub(crate) identity: Option<Arc<ClientIdentity>>,
+    pub(crate) external_certificate_key: Option<Vec<u8>>,
     /// Bounded packet groups emitted by quiche and held until `SendInfo::at`.
     pub(crate) deferred_send: DeferredSend,
     /// The deadline this connection currently holds in the server's timer
@@ -292,6 +293,7 @@ impl ClientConnection {
             early_udp_budget: EarlyUdpBudget::default(),
             index,
             identity: None,
+            external_certificate_key: None,
             deferred_send: DeferredSend::default(),
             scheduled_deadline: None,
             source_admission,

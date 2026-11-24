@@ -26,6 +26,8 @@ pub(crate) const MAX_BASIC_USERS_PER_LISTENER: usize = 4096;
 /// An immutable set of Basic credentials for one listener.
 pub(crate) struct BasicAuthenticator {
     users: HashMap<Vec<u8>, Arc<BasicCredential>>,
+    http: Option<Arc<crate::auth_http::HttpAuth>>,
+    certificate: bool,
 }
 
 /// One selected credential. A request keeps this snapshot while Argon2 runs,
@@ -143,6 +145,20 @@ pub fn check_username(username: &str) -> anyhow::Result<()> {
 }
 
 impl BasicAuthenticator {
+    pub(crate) fn with_http(
+        auth: &AuthSection,
+        http: Option<Arc<crate::auth_http::HttpAuth>>,
+    ) -> anyhow::Result<Self> {
+        if let Some(http) = http {
+            return Ok(Self {
+                users: HashMap::new(),
+                http: Some(http),
+                certificate: auth.client_cert_enabled(),
+            });
+        }
+        Self::from_section(auth)
+    }
+
     pub(crate) fn new(username: &str, password_hash: &str) -> anyhow::Result<Self> {
         Self::from_entries(std::iter::once((username, password_hash)))
     }
@@ -206,7 +222,11 @@ impl BasicAuthenticator {
         if users.is_empty() {
             bail!("a Basic listener must configure at least one user");
         }
-        Ok(Self { users })
+        Ok(Self {
+            users,
+            http: None,
+            certificate: false,
+        })
     }
 
     /// Validate a complete Basic credential field value, end to end.
@@ -262,6 +282,15 @@ impl BasicAuthenticator {
         let (username, password_with_colon) = decoded.split_at(colon);
         let password = &password_with_colon[1..];
 
+        if let Some(http) = &self.http {
+            if self.certificate {
+                return AuthPrecheck::Rejected;
+            }
+            return http
+                .basic(username, password)
+                .map(http_precheck)
+                .unwrap_or(AuthPrecheck::Rejected);
+        }
         let Some(credential) = self.users.get(username) else {
             return AuthPrecheck::Rejected;
         };
@@ -271,7 +300,7 @@ impl BasicAuthenticator {
         }
 
         AuthPrecheck::NeedsVerify {
-            credential: Arc::clone(credential),
+            credential: VerificationCredential::File(Arc::clone(credential)),
             password: Zeroizing::new(password.to_vec()),
         }
     }
@@ -351,6 +380,35 @@ impl BasicCredential {
     }
 }
 
+pub(crate) enum VerificationCredential {
+    File(Arc<BasicCredential>),
+    Http(crate::auth_http::Attempt),
+}
+impl From<Arc<BasicCredential>> for VerificationCredential {
+    fn from(value: Arc<BasicCredential>) -> Self {
+        Self::File(value)
+    }
+}
+impl VerificationCredential {
+    #[cfg(test)]
+    fn verify(&self, password: &[u8]) -> bool {
+        match self {
+            Self::File(credential) => credential.verify(password),
+            Self::Http(_) => panic!("HTTP auth is asynchronous"),
+        }
+    }
+}
+fn http_precheck(attempt: crate::auth_http::Attempt) -> AuthPrecheck {
+    if attempt.cached().is_some() {
+        AuthPrecheck::Authenticated
+    } else {
+        AuthPrecheck::NeedsVerify {
+            credential: VerificationCredential::Http(attempt),
+            password: Zeroizing::new(Vec::new()),
+        }
+    }
+}
+
 impl SharedBasicAuthenticator {
     pub(crate) fn new(auth: BasicAuthenticator) -> Self {
         Self {
@@ -358,6 +416,7 @@ impl SharedBasicAuthenticator {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn precheck(&self, value: Option<&[u8]>) -> AuthPrecheck {
         self.current
             .read()
@@ -365,6 +424,24 @@ impl SharedBasicAuthenticator {
             .precheck(value)
     }
 
+    pub(crate) fn requires_certificate(&self) -> bool {
+        self.current
+            .read()
+            .expect("auth snapshot poisoned")
+            .certificate
+    }
+    pub(crate) fn precheck_peer(&self, value: Option<&[u8]>, key: Option<&[u8]>) -> AuthPrecheck {
+        let current = self.current.read().expect("auth snapshot poisoned");
+        if let Some(http) = &current.http
+            && current.certificate
+        {
+            return key
+                .and_then(|key| http.certificate(key))
+                .map(http_precheck)
+                .unwrap_or(AuthPrecheck::Rejected);
+        }
+        current.precheck(value)
+    }
     pub(crate) fn replace(&self, auth: BasicAuthenticator) -> usize {
         let count = auth.len();
         *self.current.write().expect("Basic credential set poisoned") = Arc::new(auth);
@@ -381,7 +458,7 @@ pub(crate) enum AuthPrecheck {
     /// Well formed and the username matches; the password still needs the
     /// slow verification.
     NeedsVerify {
-        credential: Arc<BasicCredential>,
+        credential: VerificationCredential,
         password: Zeroizing<Vec<u8>>,
     },
 }
@@ -583,6 +660,7 @@ mod tests {
     #[test]
     fn one_listener_accepts_multiple_independent_users() {
         let auth = BasicAuthenticator::from_section(&AuthSection {
+            id: uuid::Uuid::nil(),
             enabled: true,
             mode: AuthMode::Basic,
             stealth: false,
@@ -590,10 +668,12 @@ mod tests {
             password_hash: String::new(),
             users: vec![
                 BasicUser {
+                    id: uuid::Uuid::new_v4(),
                     username: "alice".into(),
                     password_hash: hash_password(b"alice-secret").unwrap(),
                 },
                 BasicUser {
+                    id: uuid::Uuid::new_v4(),
                     username: "bob".into(),
                     password_hash: hash_password(b"bob-secret").unwrap(),
                 },
@@ -611,6 +691,7 @@ mod tests {
     fn multi_user_configuration_rejects_duplicates_and_legacy_mixing() {
         let hash = hash_password(b"secret").unwrap();
         let duplicate = AuthSection {
+            id: uuid::Uuid::nil(),
             enabled: true,
             mode: AuthMode::Basic,
             stealth: false,
@@ -618,10 +699,12 @@ mod tests {
             password_hash: String::new(),
             users: vec![
                 BasicUser {
+                    id: uuid::Uuid::new_v4(),
                     username: "alice".into(),
                     password_hash: hash.clone(),
                 },
                 BasicUser {
+                    id: uuid::Uuid::new_v4(),
                     username: "alice".into(),
                     password_hash: hash.clone(),
                 },
@@ -630,9 +713,11 @@ mod tests {
         assert!(BasicAuthenticator::from_section(&duplicate).is_err());
 
         let mixed = AuthSection {
+            id: uuid::Uuid::nil(),
             username: "legacy".into(),
             password_hash: hash.clone(),
             users: vec![BasicUser {
+                id: uuid::Uuid::new_v4(),
                 username: "alice".into(),
                 password_hash: hash,
             }],

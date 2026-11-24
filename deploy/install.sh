@@ -514,7 +514,9 @@ render_new_config() {
     case "$AUTH_MODE" in
         basic|dual)
             generate_auth_credentials
+            credential_id=$(cat /proc/sys/kernel/random/uuid)
             sed \
+                -e "s|00000000-0000-0000-0000-000000000000|$credential_id|" \
                 -e "s|__MASQUE_AUTH_USERNAME__|$AUTH_USERNAME|" \
                 -e "s|__MASQUE_AUTH_PASSWORD_HASH__|$AUTH_PASSWORD_HASH|" \
                 "$PACKAGE_DIR/config/masque.toml" >"$CONFIG_TMP"
@@ -523,6 +525,7 @@ render_new_config() {
             sed \
                 -e 's|^mode = "basic"$|mode = "client_cert"|' \
                 -e '/^\[\[listeners\.auth\.users\]\]$/d' \
+                -e '/^id = "00000000-0000-0000-0000-000000000000"$/d' \
                 -e '/^username = "__MASQUE_AUTH_USERNAME__"$/d' \
                 -e '/^password_hash = "__MASQUE_AUTH_PASSWORD_HASH__"$/d' \
                 "$PACKAGE_DIR/config/masque.toml" >"$CONFIG_TMP"

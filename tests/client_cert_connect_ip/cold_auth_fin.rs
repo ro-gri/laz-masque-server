@@ -28,6 +28,7 @@ fn fixture_with_windows(
     config.tls.key_path = key_path;
     config.listeners[0].listen_addr = ephemeral_addr();
     config.listeners[0].shards = 1;
+    config.listeners[0].auth.id = masque::config::Uuid::new_v4();
     config.listeners[0].auth.username = "test".into();
     config.listeners[0].auth.password_hash = "$argon2id$v=19$m=19456,t=2,p=1$1xNVXhqKU7jJ6cqTBJKphQ$GXXAINVTW1qhloFtN1IR8lSr7pI7QEY79fq4K6d8scQ".into();
     // Every following request needs the previous tunnel slot and lease back.

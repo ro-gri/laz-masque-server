@@ -272,6 +272,7 @@ fn blocked_error_responses_resume_after_credit_returns() {
 fn blocked_basic_rejections_keep_the_same_empty_404() {
     for stealth in [false, true] {
         let mut config = ServerConfig::default();
+        config.listeners[0].auth.id = masque::config::Uuid::new_v4();
         config.listeners[0].auth.username = BASIC_USERNAME.into();
         config.listeners[0].auth.password_hash =
             masque::auth::hash_password(BASIC_PASSWORD.as_bytes()).unwrap();
@@ -513,6 +514,7 @@ fn first_basic_auth_has_a_fixed_quic_deadline() {
     let mut config = ServerConfig::default();
     config.server.idle_timeout_secs = AUTH_WINDOW.as_secs();
     config.observability.listen_addr = Some(ephemeral_addr());
+    config.listeners[0].auth.id = masque::config::Uuid::new_v4();
     config.listeners[0].auth.username = BASIC_USERNAME.into();
     // Exercise a cold verification without making this deadline test depend
     // on production Argon2 cost under concurrent debug test load.

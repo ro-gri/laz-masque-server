@@ -190,8 +190,12 @@ fn http2_basic_reload_config_file(cert: &Path, key: &Path, users: &[(&str, &str)
         key.display()
     );
     for (username, password_hash) in users {
+        let digest = ring::digest::digest(&ring::digest::SHA256, username.as_bytes());
+        let id = uuid::Uuid::from_slice(&digest.as_ref()[..16])
+            .unwrap()
+            .to_string();
         text.push_str(&format!(
-            "\n[[listeners.auth.users]]\nusername = {username:?}\npassword_hash = {password_hash:?}\n"
+            "\n[[listeners.auth.users]]\nid = {id:?}\nusername = {username:?}\npassword_hash = {password_hash:?}\n"
         ));
     }
     text
@@ -445,10 +449,12 @@ async fn basic_auth_challenges_missing_credentials_and_accepts_valid_credentials
     config.listeners[0].auth.mode = AuthMode::Basic;
     config.listeners[0].auth.users = vec![
         BasicUser {
+            id: uuid::Uuid::new_v4(),
             username: "alice".into(),
             password_hash: masque::auth::hash_password(b"alice-secret").unwrap(),
         },
         BasicUser {
+            id: uuid::Uuid::new_v4(),
             username: "bob".into(),
             password_hash: masque::auth::hash_password(b"bob-secret").unwrap(),
         },
@@ -533,6 +539,7 @@ async fn basic_auth_rejections_match_unknown_paths_and_accept_proactive_credenti
     config.listeners[0].auth.mode = AuthMode::Basic;
     config.listeners[0].auth.stealth = false; // Legacy input cannot restore a challenge.
     config.listeners[0].auth.users = vec![BasicUser {
+        id: uuid::Uuid::new_v4(),
         username: "alice".into(),
         password_hash: masque::auth::hash_password(b"alice-secret").unwrap(),
     }];
@@ -646,6 +653,7 @@ async fn client_certificate_authenticates_http2_connection() {
     config.listeners[0].auth.enabled = true;
     config.listeners[0].auth.mode = AuthMode::ClientCert;
     config.clients = vec![ClientEntry {
+        id: uuid::Uuid::new_v4(),
         name: "h2-client".into(),
         public_key: STANDARD.encode(client_key.public_key_to_der().unwrap()),
         ipv4: None,
@@ -998,6 +1006,7 @@ async fn client_certificate_pins_http2_connect_ip_addresses() {
     config.listeners[0].auth.enabled = true;
     config.listeners[0].auth.mode = AuthMode::ClientCert;
     config.clients = vec![ClientEntry {
+        id: uuid::Uuid::new_v4(),
         name: "h2-ip-client".into(),
         public_key: STANDARD.encode(client_key.public_key_to_der().unwrap()),
         ipv4: Some(ipv4.to_string()),
@@ -1132,6 +1141,24 @@ async fn basic_users_reload_on_an_established_http2_connection() {
         basic_connect_status(&client, "bob", "bob-secret").await,
         StatusCode::BAD_GATEWAY,
         "a rejected reload replaced the last valid Basic credential set"
+    );
+
+    // Missing IDs must reject the entire reload, preserving the accepted password.
+    let missing_id = http2_basic_reload_config_file(&files.cert, &files.key, &[("bob", &new_hash)])
+        .lines()
+        .filter(|line| !line.starts_with("id ="))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&config_path, missing_id).unwrap();
+    raise_sighup();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        basic_connect_status(&client, "bob", "bob-secret").await,
+        StatusCode::BAD_GATEWAY
+    );
+    assert_eq!(
+        basic_connect_status(&client, "bob", "new-secret").await,
+        StatusCode::NOT_FOUND
     );
 
     driver.abort();
@@ -1567,4 +1594,236 @@ fn ech_check_config_validates_public_names_and_key_matching() {
     .unwrap();
     let err = masque::server::validate_config(&config).unwrap_err();
     assert!(format!("{err:#}").contains("no supported config matching its private key"));
+}
+
+#[path = "support/auth_server.rs"]
+mod auth_server;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn http_authorization_basic_authorizes_tcp_and_reuses_cached_decision() {
+    use masque::config::{AuthBackend, HttpAuthSection};
+    let id = uuid::Uuid::new_v4();
+    let authorizer = auth_server::AuthorizationServer::start(move |request| {
+        auth_server::Reply::json(
+            serde_json::json!({"ok": request["type"] == "basic" && request["username"] == "alice" && request["password"] == "secret", "id": id}),
+        )
+    });
+    let files = TestFiles::new();
+    let mut config = http2_config(&files);
+    config.listeners[0].auth = masque::config::AuthSection {
+        ..Default::default()
+    };
+    config.authorization = masque::config::AuthorizationSection {
+        backend: AuthBackend::Http,
+        http: Some(HttpAuthSection {
+            url: authorizer.url(),
+            ..Default::default()
+        }),
+    };
+    let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let target_addr = target.local_addr().unwrap();
+    let echo = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (mut stream, _) = target.accept().await.unwrap();
+            let mut b = [0];
+            stream.read_exact(&mut b).await.unwrap();
+            stream.write_all(&b).await.unwrap();
+        }
+    });
+    config.listeners.push(config.listeners[0].clone());
+    let mut bound = Server::bind(config).await.unwrap();
+    let addresses = bound.listen_addrs().to_vec();
+    let server = tokio::spawn(async move {
+        bound.run().await.unwrap();
+    });
+    let (mut client, driver) = connect_h2(addresses[0]).await;
+    let (mut second, second_driver) = connect_h2(addresses[1]).await;
+    for (index, password) in ["wrong", "secret", "secret"].into_iter().enumerate() {
+        let mut request = connect_request(target_addr);
+        request.headers_mut().insert(
+            "proxy-authorization",
+            format!("Basic {}", STANDARD.encode(format!("alice:{password}")))
+                .parse()
+                .unwrap(),
+        );
+        let active = if index == 2 { &mut second } else { &mut client };
+        let (response, mut body) = active.send_request(request, false).unwrap();
+        let response = response.await.unwrap();
+        if password == "wrong" {
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+            continue;
+        }
+        assert_eq!(response.status(), StatusCode::OK);
+        body.send_data(Bytes::from_static(b"x"), true).unwrap();
+        let mut response = response.into_body();
+        let received = tokio::time::timeout(Duration::from_secs(2), response.data())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(&received[..], b"x");
+    }
+    assert_eq!(authorizer.count(), 2);
+    assert_eq!(
+        authorizer
+            .connections
+            .load(std::sync::atomic::Ordering::Relaxed),
+        1
+    );
+    echo.await.unwrap();
+    driver.abort();
+    second_driver.abort();
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn http_authorization_certificate_requires_trusted_ca_and_authorizer_permission() {
+    use masque::config::{AuthBackend, HttpAuthSection};
+    let files = TestFiles::new();
+    let (ca, leaf, key) = auth_server::certificate_pair();
+    let ca_path = files.directory.join("client-ca.pem");
+    let cert_path = files.directory.join("client-leaf.pem");
+    let key_path = files.directory.join("client-key.pem");
+    std::fs::write(&ca_path, ca.to_pem().unwrap()).unwrap();
+    std::fs::write(&cert_path, leaf.to_pem().unwrap()).unwrap();
+    std::fs::write(&key_path, key.private_key_to_pem_pkcs8().unwrap()).unwrap();
+    let allowed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let permission = allowed.clone();
+    let expected_key = STANDARD.encode(key.public_key_to_der().unwrap());
+    let authorizer = auth_server::AuthorizationServer::start(move |request| {
+        assert_eq!(request["type"], "client_cert");
+        assert_eq!(request["public_key"], expected_key);
+        auth_server::Reply::json(
+            serde_json::json!({"ok":permission.load(std::sync::atomic::Ordering::Relaxed),"id":uuid::Uuid::new_v4()}),
+        )
+    });
+    let mut config = http2_config(&files);
+    config.listeners[0].auth = masque::config::AuthSection {
+        mode: AuthMode::ClientCert,
+        ..Default::default()
+    };
+    config.authorization = masque::config::AuthorizationSection {
+        backend: AuthBackend::Http,
+        http: Some(HttpAuthSection {
+            url: authorizer.url(),
+            cache_ttl_secs: 0,
+            client_ca_path: Some(ca_path),
+            ..Default::default()
+        }),
+    };
+    let (addr, server) = spawn_http2_config(config).await;
+    // An unrelated certificate must fail before the authorizer sees a request.
+    let (_, stranger, stranger_key) = auth_server::certificate_pair();
+    let mut connector = SslConnector::builder(SslMethod::tls_client()).unwrap();
+    connector.set_verify(SslVerifyMode::NONE);
+    connector.set_alpn_protos(b"\x02h2").unwrap();
+    connector.set_certificate(&stranger).unwrap();
+    connector.set_private_key(&stranger_key).unwrap();
+    let rejected = tokio_boring::connect(
+        connector.build().configure().unwrap(),
+        "localhost",
+        TcpStream::connect(addr).await.unwrap(),
+    )
+    .await;
+    // TLS 1.3 may report peer rejection only on the first read after Finished.
+    if let Ok(mut tls) = rejected {
+        let mut b = [0];
+        assert!(
+            !matches!(tokio::time::timeout(Duration::from_secs(2), tls.read(&mut b)).await, Ok(Ok(n)) if n > 0)
+        );
+    }
+    assert_eq!(authorizer.count(), 0);
+    let (mut client, driver) = connect_h2_with_identity(addr, Some((&cert_path, &key_path))).await;
+    let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let request = connect_request(target.local_addr().unwrap());
+    let (response, _) = client.send_request(request, false).unwrap();
+    assert_eq!(response.await.unwrap().status(), StatusCode::NOT_FOUND);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), target.accept())
+            .await
+            .is_err()
+    );
+    allowed.store(true, std::sync::atomic::Ordering::Relaxed);
+    let (response, _) = client
+        .send_request(connect_request(target.local_addr().unwrap()), false)
+        .unwrap();
+    assert_eq!(response.await.unwrap().status(), StatusCode::OK);
+    assert!(
+        tokio::time::timeout(Duration::from_secs(2), target.accept())
+            .await
+            .is_ok()
+    );
+    assert_eq!(authorizer.count(), 2);
+    driver.abort();
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn http_authorization_reload_clears_cache_and_rejects_invalid_replacement() {
+    use masque::config::{AuthBackend, HttpAuthSection};
+    let _sighup_guard = SIGHUP_TEST_LOCK.lock().await;
+    let files = TestFiles::new();
+    let allowed = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let permission = allowed.clone();
+    let authorizer = auth_server::AuthorizationServer::start(move |_| {
+        auth_server::Reply::json(serde_json::json!({
+            "ok": permission.load(std::sync::atomic::Ordering::Relaxed), "id": uuid::Uuid::new_v4()
+        }))
+    });
+    let mut config = http2_config(&files);
+    config.listeners[0].auth = masque::config::AuthSection {
+        ..Default::default()
+    };
+    config.authorization = masque::config::AuthorizationSection {
+        backend: AuthBackend::Http,
+        http: Some(HttpAuthSection {
+            url: authorizer.url(),
+            ..Default::default()
+        }),
+    };
+    let path = files.directory.join("http-auth.toml");
+    std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+    let (addr, server) = spawn_reloadable_http2_config(config.clone(), path.clone()).await;
+    let (client, driver) = connect_h2(addr).await;
+    assert_eq!(
+        basic_connect_status(&client, "alice", "secret").await,
+        StatusCode::BAD_GATEWAY
+    );
+    allowed.store(false, std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(
+        basic_connect_status(&client, "alice", "secret").await,
+        StatusCode::BAD_GATEWAY
+    );
+    assert_eq!(authorizer.count(), 1);
+    let mut invalid = config.clone();
+    invalid.authorization.http.as_mut().unwrap().timeout_ms = 0;
+    std::fs::write(&path, toml::to_string(&invalid).unwrap()).unwrap();
+    raise_sighup();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        basic_connect_status(&client, "alice", "secret").await,
+        StatusCode::BAD_GATEWAY
+    );
+    assert_eq!(authorizer.count(), 1);
+    std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+    raise_sighup();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while basic_connect_status(&client, "alice", "secret").await != StatusCode::NOT_FOUND {
+        assert!(tokio::time::Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let replacement = auth_server::AuthorizationServer::start(|_| {
+        auth_server::Reply::json(serde_json::json!({"ok":true,"id":uuid::Uuid::new_v4()}))
+    });
+    config.authorization.http.as_mut().unwrap().url = replacement.url();
+    std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+    raise_sighup();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while basic_connect_status(&client, "alice", "secret").await != StatusCode::BAD_GATEWAY {
+        assert!(tokio::time::Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(replacement.count(), 1);
+    driver.abort();
+    server.abort();
 }

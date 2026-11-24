@@ -456,3 +456,14 @@ retain that snapshot. No packet path locks or file reads are added. SOCKS
 credentials, budgets and counters retain their original owners. TLS/credential
 reload commits merge only their own evidence sections so they cannot overwrite
 a newer DIRECT fingerprint. Failed preparation publishes nothing.
+
+## HTTP authorization
+
+The root authorization configuration selects file or HTTP for the entire
+server. With HTTP, all listeners delegate Basic credentials or CA-verified
+certificate keys to one local authorization server. HTTP checks use the existing bounded H2/H3 request admission,
+with a server-wide asynchronous keep-alive pool, fixed response limits, a bounded HMAC-keyed
+success cache and coalesced in-flight work. Certificate proof/chain validation
+remains in TLS; the authorization gate precedes target setup and CONNECT-IP allocation.
+Neither the TLS callback nor packet forwarding performs HTTP I/O. File-mode
+roster behavior is unchanged. See [the contract and limits](http-authorization.md).

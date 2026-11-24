@@ -67,10 +67,9 @@ pub(super) fn is_loopback(ip: IpAddr) -> bool {
 
 /// Shards that verify passwords, which is what the verification budget rations.
 ///
-/// A client-certificate listener's shards hold no `BasicAuthenticator` and
-/// never reach that path, so counting them would let a large certificate
-/// deployment widen what unauthenticated callers can demand of a small Basic
-/// one.
+/// Certificate listeners never run Argon2. HTTP authorization has a separate
+/// shared in-flight limit, so certificate shards must not widen the CPU budget
+/// reserved for password hashing.
 pub(super) fn basic_shard_count(listeners: &[ListenerPlan]) -> usize {
     listeners
         .iter()
@@ -214,7 +213,13 @@ pub(super) fn active_client_registry(
     config: &ServerConfig,
     any_client_cert: bool,
 ) -> anyhow::Result<ClientRegistry> {
-    if !any_client_cert {
+    if !any_client_cert
+        || !config.listeners.iter().any(|listener| {
+            listener
+                .auth
+                .file_client_cert_enabled(&config.authorization)
+        })
+    {
         return Ok(ClientRegistry::default());
     }
 
@@ -337,6 +342,7 @@ pub(super) fn validate_server_config(
     // Surface a bad credential or active roster configuration first. A roster
     // outside client-cert mode is deliberately not parsed or allowed to
     // reserve pool addresses: the configuration contract says it is ignored.
+    crate::credential_id::validate(config)?;
     let clients = active_client_registry(config, any_client_cert)?;
     if any_client_cert {
         info!(
@@ -354,10 +360,12 @@ pub(super) fn validate_server_config(
     // the listener it came from or it cannot be found in a multi-listener file.
     for plan in &listeners {
         let addr = plan.listener.listen_addr;
-        if plan.listener.auth.basic_enabled() {
+        if plan.listener.auth.basic_enabled()
+            && config.authorization.backend == crate::config::AuthBackend::File
+        {
             BasicAuthenticator::from_section(&plan.listener.auth)
                 .with_context(|| format!("listener {addr}"))?;
-        } else if !plan.listener.auth.client_cert_enabled() {
+        } else if !plan.listener.auth.enabled {
             warn!(%addr, "proxy authentication is disabled on this listener");
         }
     }
@@ -566,7 +574,7 @@ pub(super) fn validate_server_config(
         let client_certs = plan
             .listener
             .auth
-            .client_cert_enabled()
+            .file_client_cert_enabled(&config.authorization)
             .then(|| Arc::new(SharedRoster::new(clients.clone())));
         match plan.listener.transport {
             ListenerTransport::Http3 => {
@@ -575,13 +583,18 @@ pub(super) fn validate_server_config(
                     plan.listener
                         .effective_quic_max_datagram_size(config.quic.max_datagram_size),
                     client_certs,
+                    plan.listener.auth.http_client_ca(&config.authorization),
                     Arc::clone(&tls),
                 )
                 .with_context(|| format!("listener {}", plan.listener.listen_addr))?;
             }
             ListenerTransport::Http2 => {
-                http2::build_acceptor(client_certs, Arc::clone(&tls))
-                    .with_context(|| format!("listener {}", plan.listener.listen_addr))?;
+                http2::build_acceptor(
+                    client_certs,
+                    plan.listener.auth.http_client_ca(&config.authorization),
+                    Arc::clone(&tls),
+                )
+                .with_context(|| format!("listener {}", plan.listener.listen_addr))?;
             }
         }
     }

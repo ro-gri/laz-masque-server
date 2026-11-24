@@ -91,7 +91,7 @@ fn basic_config_text(cert_path: &Path, key_path: &Path, with_client: bool) -> St
     let password_hash = masque::auth::hash_password(b"correct horse battery staple").unwrap();
     let roster = if with_client {
         format!(
-            "\n[[clients]]\nname = \"laptop\"\npublic_key = \"{}\"\n",
+            "\n[[clients]]\nid = \"6c3fb278-bd55-4d27-8462-2491c7c57ea0\"\nname = \"laptop\"\npublic_key = \"{}\"\n",
             STANDARD.encode(p256_key().public_key_to_der().unwrap())
         )
     } else {
@@ -112,6 +112,7 @@ listen_addr = "127.0.0.1:8449"
 shards = 1
 
 [listeners.auth]
+id = "f0e6c62a-509d-5952-8798-3f6ba08ee947"
 enabled = true
 mode = "basic"
 username = "alice"
@@ -851,6 +852,7 @@ fn reports_a_missing_configuration_file_instead_of_creating_one() {
 #[test]
 fn add_user_migrates_legacy_credentials_and_list_users_redacts_hashes() {
     let fixture = Fixture::new(false);
+    let original_id = fixture.config().listeners[0].auth.id;
     let output = fixture.user_command(
         "add-user",
         &["--username", "bob", "--password-stdin"],
@@ -864,6 +866,10 @@ fn add_user_migrates_legacy_credentials_and_list_users_redacts_hashes() {
 
     let config = fixture.config();
     let auth = &config.listeners[0].auth;
+    assert!(auth.id.is_nil());
+    assert_eq!(auth.users[0].id, original_id);
+    assert!(!auth.users[1].id.is_nil());
+    assert_ne!(auth.users[0].id, auth.users[1].id);
     assert!(auth.username.is_empty());
     assert!(auth.password_hash.is_empty());
     assert_eq!(
@@ -896,6 +902,7 @@ fn add_user_migrates_legacy_credentials_and_list_users_redacts_hashes() {
     let stdout = String::from_utf8_lossy(&listed.stdout);
     assert!(stdout.contains("alice"));
     assert!(stdout.contains("bob"));
+    assert!(stdout.contains(&bob.id.to_string()));
     assert!(!stdout.contains("argon2"));
 }
 
@@ -1018,6 +1025,8 @@ fn set_password_changes_only_the_selected_user() {
     let after = fixture.config();
     let auth = &after.listeners[0].auth;
     assert_eq!(auth.users[0].password_hash, alice_hash);
+    assert_eq!(auth.users[0].id, before.listeners[0].auth.users[0].id);
+    assert_eq!(auth.users[1].id, before.listeners[0].auth.users[1].id);
     let bob = auth
         .users
         .iter()
@@ -1082,4 +1091,136 @@ fn duplicate_user_is_rejected_without_changing_the_file() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("already exists"));
     assert_eq!(fixture.text(), before);
+}
+
+#[test]
+fn explicit_credential_id_is_preserved_and_invalid_ids_leave_file_unchanged() {
+    let fixture = Fixture::new(false);
+    let id = uuid::Uuid::new_v4();
+    let added = fixture.user_command(
+        "add-user",
+        &[
+            "--id",
+            &id.to_string(),
+            "--username",
+            "bob",
+            "--password-stdin",
+        ],
+        Some(b"bob-secret\n"),
+    );
+    assert!(
+        added.status.success(),
+        "{}",
+        String::from_utf8_lossy(&added.stderr)
+    );
+    assert_eq!(fixture.config().listeners[0].auth.users[1].id, id);
+    let before = fixture.text();
+    for invalid in [
+        "not-a-uuid".to_owned(),
+        uuid::Uuid::nil().to_string(),
+        id.to_string(),
+    ] {
+        let rejected = fixture.user_command(
+            "add-user",
+            &["--id", &invalid, "--username", "carol", "--password-stdin"],
+            Some(b"carol-secret\n"),
+        );
+        assert!(!rejected.status.success());
+        assert_eq!(fixture.text(), before);
+    }
+}
+
+#[test]
+fn http_backend_refuses_local_user_management_without_modifying_the_file() {
+    let fixture = Fixture::new(false);
+    let mut config = fixture.config();
+    config.listeners[0].auth = masque::config::AuthSection {
+        ..Default::default()
+    };
+    config.authorization = masque::config::AuthorizationSection {
+        backend: masque::config::AuthBackend::Http,
+        http: Some(masque::config::HttpAuthSection {
+            url: "http://127.0.0.1:9/authorize".into(),
+            ..Default::default()
+        }),
+    };
+    std::fs::write(&fixture.config_path, toml::to_string(&config).unwrap()).unwrap();
+    let before = fixture.text();
+    let valid = fixture.user_command("check-config", &[], None);
+    assert!(
+        valid.status.success(),
+        "{}",
+        String::from_utf8_lossy(&valid.stderr)
+    );
+    for (command, args) in [
+        (
+            "enroll-client",
+            vec!["--name", "alice", "--endpoint", "192.0.2.1:443"],
+        ),
+        ("list-users", vec![]),
+        ("add-user", vec!["--username", "bob", "--password-stdin"]),
+        (
+            "set-password",
+            vec!["--username", "alice", "--password-stdin"],
+        ),
+        ("remove-user", vec!["--username", "alice"]),
+    ] {
+        let output = fixture.user_command(command, &args, None);
+        assert!(!output.status.success(), "{command}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("backend = http"),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stdout.is_empty());
+        assert_eq!(fixture.text(), before);
+    }
+}
+
+#[test]
+fn http_add_listener_inherits_global_source_without_creating_credentials() {
+    let fixture = Fixture::new(false);
+    let mut config = fixture.config();
+    config.listeners[0].auth = Default::default();
+    config.authorization = masque::config::AuthorizationSection {
+        backend: masque::config::AuthBackend::Http,
+        http: Some(masque::config::HttpAuthSection {
+            url: "http://127.0.0.1:9/authorize".into(),
+            ..Default::default()
+        }),
+    };
+    std::fs::write(&fixture.config_path, toml::to_string(&config).unwrap()).unwrap();
+    let before = fixture.text();
+    let rejected = fixture.add_listener(&[
+        "--listen-addr",
+        "127.0.0.1:18443",
+        "--mode",
+        "basic",
+        "--username",
+        "bob",
+        "--yes",
+    ]);
+    assert!(!rejected.status.success());
+    assert_eq!(fixture.text(), before);
+    let added = fixture.add_listener(&[
+        "--listen-addr",
+        "127.0.0.1:18443",
+        "--mode",
+        "basic",
+        "--no-bind-check",
+        "--yes",
+    ]);
+    assert!(
+        added.status.success(),
+        "{}",
+        String::from_utf8_lossy(&added.stderr)
+    );
+    let config = fixture.config();
+    assert_eq!(config.listeners.len(), 2);
+    assert!(config.listeners[1].auth.users.is_empty());
+    assert!(config.listeners[1].auth.id.is_nil());
+    assert_eq!(
+        config.authorization.backend,
+        masque::config::AuthBackend::Http
+    );
 }

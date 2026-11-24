@@ -70,8 +70,9 @@ impl Http2Listener {
         let acceptor = Arc::new(build_acceptor(
             listener
                 .auth
-                .client_cert_enabled()
+                .file_client_cert_enabled(&config.authorization)
                 .then(|| Arc::clone(&shared.clients)),
+            listener.auth.http_client_ca(&config.authorization),
             Arc::clone(&shared.tls),
         )?);
 
@@ -83,7 +84,7 @@ impl Http2Listener {
             .expect("one metrics owner was requested for the HTTP/2 listener");
         let client_certs = listener
             .auth
-            .client_cert_enabled()
+            .file_client_cert_enabled(&config.authorization)
             .then(|| Arc::clone(&shared.clients));
 
         info!(addr = %listen_addr, transport = "http2", "listening");
@@ -159,6 +160,7 @@ impl Http2Listener {
                     };
 
                     let context = ConnectionContext {
+                        peer_key: None,
                         resolver: self.shared.resolver.connection(),
                         acceptor: Arc::clone(&self.acceptor),
                         config: Arc::clone(&self.config),
@@ -200,6 +202,7 @@ impl Http2Listener {
 
 #[derive(Clone)]
 struct ConnectionContext {
+    peer_key: Option<Arc<Vec<u8>>>,
     resolver: TargetResolver,
     acceptor: Arc<SslAcceptor>,
     config: Arc<ServerConfig>,
@@ -214,6 +217,7 @@ struct ConnectionContext {
 /// Validate and build the TLS context used by an H2 listener.
 pub(super) fn build_acceptor(
     client_certs: Option<Arc<SharedRoster>>,
+    http_client_ca: Option<&std::path::Path>,
     tls_identity: Arc<tls::SharedTlsIdentity>,
 ) -> anyhow::Result<SslAcceptor> {
     let mut builder = SslAcceptor::mozilla_intermediate_v5(SslMethod::tls_server())
@@ -222,6 +226,9 @@ pub(super) fn build_acceptor(
     builder.set_alpn_select_callback(|_, client| {
         select_next_proto(b"\x02h2", client).ok_or(AlpnError::NOACK)
     });
+    if let Some(ca) = http_client_ca {
+        crate::client_identity::configure_ca_cert_verification(&mut builder, ca)?;
+    }
     if let Some(roster) = client_certs {
         configure_client_cert_verification(&mut builder, roster);
     }

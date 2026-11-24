@@ -1,11 +1,9 @@
 //! CONNECT request classification, authentication precheck, and dispatch.
 
-use std::sync::Arc;
-
 use quiche::h3::NameValue;
 use tracing::{info, warn};
 
-use crate::auth::{AuthPrecheck, BasicCredential, SharedBasicAuthenticator};
+use crate::auth::{AuthPrecheck, SharedBasicAuthenticator, VerificationCredential};
 use crate::config::ServerConfig;
 use crate::uri;
 
@@ -30,7 +28,7 @@ pub(super) enum ConnectRequest {
 /// A prechecked CONNECT request whose password still has to be verified.
 pub(super) struct PendingAuth {
     pub(super) stream_id: u64,
-    pub(super) credential: Arc<BasicCredential>,
+    pub(super) credential: VerificationCredential,
     pub(super) password: zeroize::Zeroizing<Vec<u8>>,
     pub(super) request: ConnectRequest,
 }
@@ -131,6 +129,7 @@ pub(super) fn prepare_connect_ip(
 pub(super) struct RequestContext<'a> {
     pub(super) metrics: &'a crate::metrics::ShardMetrics,
     pub(super) config: &'a ServerConfig,
+    pub(super) peer_key: Option<&'a [u8]>,
     pub(super) auth: Option<&'a SharedBasicAuthenticator>,
     pub(super) first_auth_deadline: &'a mut Option<std::time::Instant>,
 }
@@ -197,7 +196,7 @@ impl Shard {
                 Self::send_auth_rejection(h3, quic, pending_errors, stream_id);
                 return None;
             }
-            match auth.precheck(headers.basic_authorization) {
+            match auth.precheck_peer(headers.basic_authorization, context.peer_key) {
                 AuthPrecheck::Authenticated => {
                     // A long batch of header events can cross the deadline
                     // after the shard began polling it.

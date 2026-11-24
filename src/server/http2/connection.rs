@@ -29,7 +29,7 @@ use crate::client_identity::ClientIdentity;
 pub(super) async fn serve(
     stream: TcpStream,
     peer: std::net::SocketAddr,
-    context: ConnectionContext,
+    mut context: ConnectionContext,
     mut shutdown: watch::Receiver<bool>,
     _connection_slot: OwnedSemaphorePermit,
     _source_admission: SourceAdmission,
@@ -60,6 +60,23 @@ pub(super) async fn serve(
     if tls.ssl().selected_alpn_protocol() != Some(b"h2") {
         warn!(%peer, "HTTP/2 TLS connection negotiated no h2 ALPN");
         return;
+    }
+
+    if context
+        .auth
+        .as_ref()
+        .is_some_and(|auth| auth.requires_certificate())
+    {
+        let key = tls
+            .ssl()
+            .peer_certificate()
+            .and_then(|cert| cert.to_der().ok())
+            .and_then(|der| crate::client_identity::spki_from_cert_der(&der).ok());
+        let Some(key) = key else {
+            context.metrics.record_auth_failure();
+            return;
+        };
+        context.peer_key = Some(Arc::new(key));
     }
 
     let (authenticated_identity, mut applied_roster_generation) =

@@ -519,6 +519,24 @@ impl Shard {
             }
         }
 
+        if client.quic.is_established()
+            && client.external_certificate_key.is_none()
+            && self
+                .auth
+                .as_ref()
+                .is_some_and(|auth| auth.requires_certificate())
+        {
+            let key = client
+                .quic
+                .peer_cert()
+                .and_then(|cert| crate::client_identity::spki_from_cert_der(cert).ok());
+            let Some(key) = key else {
+                let _ = client.quic.close(false, 0x0100, b"unauthorized");
+                return;
+            };
+            client.external_certificate_key = Some(key);
+        }
+
         // Upgrade only after the full handshake. The TLS context rejects
         // Early Data; the second condition is defense in depth against a
         // future TLS/configuration regression reaching this application gate.
@@ -628,6 +646,7 @@ impl Shard {
                         let tcp_setup_count = pending_setups.tcp.len();
                         let udp_setup_count = pending_setups.udp.len();
                         let mut request_context = RequestContext {
+                            peer_key: client.external_certificate_key.as_deref(),
                             metrics: &self.metrics,
                             config: &self.config,
                             auth: self.auth.as_deref(),

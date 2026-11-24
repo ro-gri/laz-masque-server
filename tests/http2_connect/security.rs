@@ -4,6 +4,7 @@ fn basic_config(files: &TestFiles) -> ServerConfig {
     let mut config = http2_config(files);
     config.listeners[0].auth.enabled = true;
     config.listeners[0].auth.users = vec![BasicUser {
+        id: uuid::Uuid::new_v4(),
         username: "audit".into(),
         password_hash: masque::auth::hash_password(b"audit-test-secret").unwrap(),
     }];

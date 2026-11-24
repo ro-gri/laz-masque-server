@@ -23,6 +23,8 @@ use crate::config::ClientEntry;
 /// One pre-registered client.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientIdentity {
+    /// Stable credential identity, independent of transport and display name.
+    pub id: uuid::Uuid,
     /// Operator-chosen label, used in logs.
     pub name: String,
     /// The canonical SubjectPublicKeyInfo DER this identity was matched by.
@@ -103,6 +105,7 @@ impl ClientRegistry {
                 .transpose()?;
 
             let identity = Arc::new(ClientIdentity {
+                id: entry.id,
                 name: label.clone(),
                 key: spki.clone(),
                 ipv4,
@@ -357,6 +360,28 @@ fn canonical_spki(key: &PKey<Public>) -> anyhow::Result<Vec<u8>> {
         .context("failed to encode public key")
 }
 
+/// HTTP-backed certificates pass normal chain/expiry/client-purpose validation
+/// here; the asynchronous authorizer gate still authorizes every new tunnel.
+pub(crate) fn configure_ca_cert_verification(
+    builder: &mut SslContextBuilder,
+    ca_path: &std::path::Path,
+) -> anyhow::Result<()> {
+    let pem = std::fs::read(ca_path).context("failed to read client CA")?;
+    let certificates = X509::stack_from_pem(&pem).context("invalid client CA PEM")?;
+    anyhow::ensure!(!certificates.is_empty(), "client CA file is empty");
+    let mut store = boring::x509::store::X509StoreBuilder::new()?;
+    for cert in certificates {
+        builder.add_client_ca(&cert)?;
+        store.add_cert(cert)?;
+    }
+    builder.set_verify_cert_store(store.build())?;
+    builder.set_verify(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT);
+    // Require a fresh certificate proof and validity check on every connection.
+    builder.set_options(boring::ssl::SslOptions::NO_TICKET);
+    builder.set_session_cache_mode(boring::ssl::SslSessionCacheMode::OFF);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,6 +421,7 @@ mod tests {
 
     fn entry(name: &str, public_key: String) -> ClientEntry {
         ClientEntry {
+            id: uuid::Uuid::new_v4(),
             name: name.into(),
             public_key,
             ipv4: None,
@@ -494,6 +520,7 @@ mod tests {
 
         let key = p256_key();
         let bad_ipv4 = ClientEntry {
+            id: uuid::Uuid::new_v4(),
             name: "a".into(),
             public_key: public_key_b64(&key),
             ipv4: Some("10.89.0.999".into()),
@@ -516,6 +543,7 @@ mod tests {
         );
 
         let pinned = |name: &str, key: &PKey<Private>| ClientEntry {
+            id: uuid::Uuid::new_v4(),
             name: name.into(),
             public_key: public_key_b64(key),
             ipv4: Some("10.89.0.2".into()),
@@ -536,6 +564,7 @@ mod tests {
     fn static_addresses_are_collected_across_the_roster() {
         let clients = [
             ClientEntry {
+                id: uuid::Uuid::new_v4(),
                 name: "a".into(),
                 public_key: public_key_b64(&p256_key()),
                 ipv4: Some("10.89.0.2".into()),

@@ -138,6 +138,7 @@ async fn spawn_server_with_udp_policy(
     config.listeners[0].auth.username.clear();
     config.listeners[0].auth.password_hash.clear();
     config.listeners[0].auth.users = vec![BasicUser {
+        id: masque::config::Uuid::new_v4(),
         username: "probe-user".into(),
         password_hash: masque::auth::hash_password(b"probe-password").unwrap(),
     }];
@@ -180,6 +181,7 @@ async fn spawn_certificate_server(
     config.listeners[0].auth.password_hash.clear();
     config.listeners[0].auth.users.clear();
     config.clients = vec![ClientEntry {
+        id: masque::config::Uuid::new_v4(),
         name: "probe-client".into(),
         public_key,
         ipv4: None,

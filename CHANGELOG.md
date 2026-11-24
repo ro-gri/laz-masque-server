@@ -7,12 +7,24 @@ pre-1.0.
 
 ## Unreleased
 
+### Breaking
+
+- Require a typed, non-nil UUID `id` for active Basic and certificate credentials.
+  Existing configurations need explicit IDs before upgrade. Credential creation
+  commands generate UUIDs or accept `--id`; password edits preserve identity.
+
 ### Changed
 
 - Size SOCKS5 UDP receive buffers by the configured upstream packet limit on
   H2 and H3, preserving truncation detection and portable single-packet reads.
 
 ### Added
+
+- Add optional local HTTP authorization for Basic and CA-verified client
+  certificates, with pooled keep-alive connections, bounded success caching
+  and coalesced checks. Use one root authorization source and shared pool/cache
+  for all listeners; reject file credentials and local user-management commands
+  in HTTP mode.
 
 - Add `reload-direct-cidrs` over the private local control socket to apply only
   the startup DIRECT CIDR file without restarting or changing active tunnels.

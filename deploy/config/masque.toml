@@ -1,3 +1,8 @@
+# One credential source for every listener. For HTTP authorization, remove all
+# file credentials and configure [authorization.http]; see docs/http-authorization.md.
+[authorization]
+backend = "file"
+
 [server]
 # Keep this above the client's keepalive period. VPN-style MASQUE clients
 # commonly default to 30s, and matching that exactly makes a quiet tunnel race
@@ -75,6 +80,9 @@ mode = "basic"
 # Account edits can be made with add-user/set-password/remove-user and applied
 # with `systemctl reload masque` without dropping established tunnels.
 [[listeners.auth.users]]
+# Installer replaces the nil placeholder with a new UUID. Set a UUID manually
+# when using this template without the installer; nil IDs are rejected.
+id = "00000000-0000-0000-0000-000000000000"
 username = "__MASQUE_AUTH_USERNAME__"
 password_hash = "__MASQUE_AUTH_PASSWORD_HASH__"
 
@@ -93,6 +101,7 @@ password_hash = "__MASQUE_AUTH_PASSWORD_HASH__"
 # An --out path is created as a new 0600 file on Unix and is never overwritten.
 #
 # [[clients]]
+# id = "6ba7b810-9dad-41d1-80b4-00c04fd430c8"
 # name = "laptop"
 # public_key = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE..."
 # ipv4 = "10.89.0.2"

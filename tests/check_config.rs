@@ -463,10 +463,13 @@ enabled = true
 mode = "basic"
 
 [[listeners.auth.users]]
+
+id = "a1ff83d6-85a4-54b4-beb9-2ac0f1a2fa11"
 username = "PRIVATE-USERNAME"
 password_hash = "{password_hash}"
 
 [[clients]]
+id = "60edfee3-23bf-5d02-ad99-7216863f99b1"
 name = "PRIVATE-CLIENT-LABEL"
 public_key = "PRIVATE-PUBLIC-KEY""#
         ),
@@ -683,6 +686,7 @@ listen_addr = "{basic_addr}"
 shards = 1
 
 [listeners.auth]
+id = "e22fd058-28a4-5460-b7f4-0d640d747db8"
 enabled = true
 mode = "basic"
 username = "alice"
@@ -697,6 +701,7 @@ enabled = true
 mode = "client_cert"
 
 [[clients]]
+id = "d29b8381-dd2e-5b27-9fd3-2df9509ef6fa"
 name = "laptop"
 public_key = "{client_public_key}"
 "#,
@@ -1074,6 +1079,7 @@ fn status_compares_running_config_and_successful_reload_without_exposing_values(
     std::fs::write(&routes, "192.0.2.0/24\n").unwrap();
     cfg.outbound.direct_cidrs_file = Some(routes.clone());
     cfg.listeners[0].auth.enabled = true;
+    cfg.listeners[0].auth.id = masque::config::Uuid::new_v4();
     cfg.listeners[0].auth.username = "runtime-status-user-sentinel".into();
     cfg.listeners[0].auth.password_hash = masque::auth::hash_password(b"first-password").unwrap();
     let write_config = |config: &masque::config::ServerConfig| {

@@ -13,7 +13,7 @@ use zeroize::Zeroizing;
 use super::ConnectionContext;
 use super::support::send_error;
 use crate::admission::SourceAdmission;
-use crate::auth::{AuthPrecheck, BasicCredential};
+use crate::auth::{AuthPrecheck, VerificationCredential};
 use crate::client_identity::{ClientIdentity, SharedRoster};
 use crate::metrics::ShardMetrics;
 
@@ -68,22 +68,23 @@ pub(super) async fn authorize_request(
         let _ = send_auth_rejection(respond);
         return Authorization::ResponseSent;
     }
-    let (credential, password) = match auth.precheck(first) {
-        AuthPrecheck::Authenticated => {
-            context.metrics.record_auth_cache_hit();
-            context.metrics.record_auth_success();
-            return Authorization::Granted;
-        }
-        AuthPrecheck::Rejected => {
-            context.metrics.record_auth_failure();
-            let _ = send_auth_rejection(respond);
-            return Authorization::ResponseSent;
-        }
-        AuthPrecheck::NeedsVerify {
-            credential,
-            password,
-        } => (credential, password),
-    };
+    let (credential, password) =
+        match auth.precheck_peer(first, context.peer_key.as_deref().map(Vec::as_slice)) {
+            AuthPrecheck::Authenticated => {
+                context.metrics.record_auth_cache_hit();
+                context.metrics.record_auth_success();
+                return Authorization::Granted;
+            }
+            AuthPrecheck::Rejected => {
+                context.metrics.record_auth_failure();
+                let _ = send_auth_rejection(respond);
+                return Authorization::ResponseSent;
+            }
+            AuthPrecheck::NeedsVerify {
+                credential,
+                password,
+            } => (credential, password),
+        };
     let auth_slot = match auth_slots.try_acquire_owned() {
         Ok(slot) => slot,
         Err(_) => {
@@ -134,7 +135,7 @@ enum AuthResult {
 }
 
 async fn verify_password(
-    credential: Arc<BasicCredential>,
+    credential: VerificationCredential,
     password: Zeroizing<Vec<u8>>,
     queue_slots: Arc<Semaphore>,
     permits: Arc<Semaphore>,

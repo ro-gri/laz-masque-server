@@ -130,6 +130,7 @@ async fn ip_uri_validation_does_not_create_an_unauthenticated_stealth_oracle() {
     config.listeners[0].auth.mode = AuthMode::Basic;
     config.listeners[0].auth.stealth = true;
     config.listeners[0].auth.users = vec![BasicUser {
+        id: uuid::Uuid::new_v4(),
         username: "alice".into(),
         password_hash: masque::auth::hash_password(b"alice-secret").unwrap(),
     }];

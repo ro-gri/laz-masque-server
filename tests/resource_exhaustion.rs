@@ -167,6 +167,7 @@ enabled = true
 mode = "basic"
 
 [[listeners.auth.users]]
+id = "9f4dd0c2-a490-57b7-b987-6efa1b5d6829"
 username = "alice"
 password_hash = {password_hash:?}
 

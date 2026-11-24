@@ -202,6 +202,20 @@ does not send client credentials and the listener still requires them.
 
 ## Authentication
 
+The root `[authorization]` table chooses the credential source for the whole
+server. Omit it to keep existing file authorization:
+
+```toml
+[authorization]
+backend = "file" # or "http"
+```
+
+HTTP settings belong in `[authorization.http]`. When HTTP is selected, all
+local Basic credentials and `[[clients]]` entries are invalid, even on disabled
+listeners. File mode rejects HTTP settings. See
+[HTTP authorization](http-authorization.md) for complete examples and the
+request/response contract.
+
 Each `[listeners.auth]` selects how clients prove who they are on that socket.
 The two modes are mutually exclusive *on one socket* — `client_cert` makes the
 TLS handshake demand a certificate, so a credential-based client cannot even
@@ -213,6 +227,7 @@ connect, and vice versa. To serve both kinds of client, define two listeners.
 | `mode` | `basic` (default) or `client_cert` |
 | `stealth` | Legacy field, accepted but ignored; failed Basic authentication always returns an empty `404` |
 | `[[listeners.auth.users]]` | `basic` only; one or more accounts on this socket |
+| `users[].id` | Required non-nil credential UUID |
 | `users[].username` | Unique Basic username on this listener |
 | `users[].password_hash` | Argon2id PHC string |
 | `[[clients]]` | `client_cert` only; the roster of allowed clients |
@@ -220,6 +235,43 @@ connect, and vice versa. To serve both kinds of client, define two listeners.
 Choose `basic` for peers that send HTTP Basic credentials, or `client_cert`
 for peers that authenticate using a registered TLS client public key. See
 [CONNECT-IP compatibility](protocols.md#legacy-connect-ip-format).
+
+The HTTP backend obtains decisions and credential UUIDs from a local
+authorization server. All listeners share its connection pool and cache.
+Listener authentication modes remain independent of this global source.
+
+### Credential IDs
+
+The file-backend rules and commands below apply when `authorization.backend = "file"`.
+HTTP authorization obtains the UUID from the authorization server instead.
+
+Every enabled Basic credential and every active client-certificate entry requires
+an explicit non-nil UUID `id`. The server stores it as a typed UUID (16 bytes);
+TOML represents it as a quoted UUID. Arbitrary strings and nil UUIDs are rejected.
+A credential has one identity across H2/H3 and TCP, UDP or IP tunnels. Reuse the
+same ID for the same Basic account on multiple listeners; one ID cannot refer
+to different usernames, two certificate keys, or both authentication methods.
+Duplicate IDs within a single Basic listener are rejected. Different password
+hashes for the same username/ID on different listeners are permitted for rotation;
+the operator is responsible for keeping those entries consistent.
+
+This is a breaking configuration change: existing active credentials without
+IDs must be edited before upgrading. Generate a UUID for each credential and
+persist it; do not generate IDs on server startup. For the legacy scalar Basic
+spelling, put `id` beside `username` and `password_hash` in `[listeners.auth]`.
+With `[[listeners.auth.users]]`, put `id` in each user table instead. Certificate
+entries put it in `[[clients]]`. Invalid reloads leave the running configuration
+unchanged. Disabled authentication and inactive certificate rosters remain ignored.
+
+`add-user`, `add-listener` (Basic) and `enroll-client` generate UUID v4 values unless
+`--id UUID` is supplied. `list-users` prints ID and username, without password
+hashes. `set-password` preserves the ID, including when converting scalar Basic
+credentials to a users table. Password/removal commands still select by username
+and listener; selection by ID is not introduced in this change. Deleting and
+recreating a credential generates a new ID unless explicitly supplied. Enrollment
+puts the ID in the server roster entry; clients do not need to send this ID.
+These IDs prepare for traffic accounting; per-credential counters are not yet
+implemented.
 
 ### `mode = "basic"` (default)
 
@@ -238,10 +290,12 @@ mode = "basic"
 # Send Basic credentials on the first CONNECT request.
 
 [[listeners.auth.users]]
+id = "a72b66a5-e247-547c-a34d-8fe9f0607349"
 username = "proxy-user"
 password_hash = "$argon2id$v=19$m=19456,t=2,p=1$..."
 
 [[listeners.auth.users]]
+id = "20adf8c8-1671-5fc6-9884-99eff1e3301e"
 username = "phone"
 password_hash = "$argon2id$v=19$m=19456,t=2,p=1$..."
 ```
@@ -375,12 +429,14 @@ enabled = true
 mode = "client_cert"
 
 [[clients]]
+id = "14f49796-22fd-581d-a228-deea68d6e148"
 name = "laptop"
 public_key = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE..."
 ipv4 = "10.89.0.2"
 ipv6 = "fd00:abcd::2"
 
 [[clients]]
+id = "fa6fa25d-1f4c-5d46-a521-801cbe76e165"
 name = "phone"
 public_key = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE..."
 ipv4 = "10.89.0.3"
@@ -389,6 +445,7 @@ ipv6 = "fd00:abcd::3"
 
 | `[[clients]]` key | Meaning |
 | --- | --- |
+| `id` | Required non-nil credential UUID |
 | `name` | Label used in the server's logs. Optional but makes them readable |
 | `public_key` | The client's ECDSA P-256 public key: base64 SubjectPublicKeyInfo DER, or a `-----BEGIN PUBLIC KEY-----` block |
 | `ipv4` | Fixed CONNECT-IP address, inside `ip_proxy.ipv4_pool` |
@@ -430,6 +487,7 @@ enabled = true
 mode = "basic"
 
 [[listeners.auth.users]]
+id = "1742d929-2797-5648-b445-346f4c82d42d"
 username = "proxy-user"
 password_hash = "$argon2id$v=19$m=19456,t=2,p=1$..."
 
@@ -892,6 +950,7 @@ enabled = true
 mode = "basic"
 
 [[listeners.auth.users]]
+id = "2f64ea57-5bd8-5a80-8b72-16ba2c975748"
 username = "exit-direct"
 password_hash = "$argon2id$..."
 
@@ -907,6 +966,7 @@ enabled = true
 mode = "basic"
 
 [[listeners.auth.users]]
+id = "4299fd90-2c20-52c5-8b2d-0bcd990a6b24"
 username = "exit-relay"
 password_hash = "$argon2id$..."
 

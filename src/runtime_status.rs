@@ -133,26 +133,47 @@ fn sections(
     value["outbound"]["files_digest"] = serde_json::json!(files);
     // Ignore disabled authentication material and the obsolete stealth switch.
     let credentials: Vec<_> = config.listeners.iter().map(|listener| {
-        if listener.auth.basic_enabled() {
+        if listener.auth.basic_enabled() && !listener.auth.http_enabled(&config.authorization) {
             if listener.auth.users.is_empty() {
-                serde_json::json!([{"username": listener.auth.username, "password_hash": listener.auth.password_hash}])
+                serde_json::json!([{"id": listener.auth.id, "username": listener.auth.username, "password_hash": listener.auth.password_hash}])
             } else { serde_json::json!(listener.auth.users) }
         } else { serde_json::json!([]) }
     }).collect();
     for listener in value["listeners"].as_array_mut().unwrap() {
         let auth = listener["auth"].as_object_mut().unwrap();
-        for field in ["users", "username", "password_hash", "stealth"] {
+        for field in ["id", "users", "username", "password_hash", "stealth"] {
             auth.remove(field);
         }
     }
-    if !config
-        .listeners
-        .iter()
-        .any(|listener| listener.auth.client_cert_enabled())
-    {
+    if !config.listeners.iter().any(|listener| {
+        listener
+            .auth
+            .file_client_cert_enabled(&config.authorization)
+    }) {
         value["clients"] = serde_json::json!([]);
     }
     value["basic_credentials"] = serde_json::json!(credentials);
+    let mut http = serde_json::to_value(&config.authorization.http)?;
+    if let Some(object) = http.as_object_mut() {
+        object.remove("client_ca_path");
+    }
+    let authority = config
+        .authorization
+        .http
+        .as_ref()
+        .and_then(|http| http.client_ca_path.as_deref())
+        .map(|path| {
+            Ok::<_, anyhow::Error>(serde_json::json!({"path": path, "digest": digest(key,
+                &std::fs::read(path).context("cannot read client CA for status fingerprint")?)}))
+        })
+        .transpose()?;
+    value["authorization"]
+        .as_object_mut()
+        .unwrap()
+        .remove("http");
+    value["http_authorization"] = http;
+    value["client_authorities"] = serde_json::json!(authority);
+
     value["tls_identity"] = serde_json::json!(tls.identity);
     if let Some(ech) = tls.ech {
         value["tls"]["ech_config_fingerprint"] = serde_json::json!(ech);
@@ -169,7 +190,7 @@ fn sections(
                     digest: digest(key, &bytes),
                     reloadable: matches!(
                         name.as_str(),
-                        "clients" | "basic_credentials" | "tls_identity"
+                        "clients" | "basic_credentials" | "tls_identity" | "http_authorization"
                     ),
                 },
             ))
@@ -452,6 +473,52 @@ mod tests {
         assert_eq!(
             snapshot.sections["outbound"].digest,
             disk["outbound"].digest
+        );
+    }
+    #[test]
+    fn http_settings_reload_but_ca_content_requires_restart() {
+        struct File(std::path::PathBuf);
+        impl Drop for File {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let file =
+            File(std::env::temp_dir().join(format!("masque-ca-evidence-{}", uuid::Uuid::new_v4())));
+        std::fs::write(&file.0, "first CA bytes").unwrap();
+        let mut config = ServerConfig::default();
+        config.listeners[0].auth.mode = crate::config::AuthMode::ClientCert;
+        config.authorization.backend = crate::config::AuthBackend::Http;
+        config.authorization.http = Some(crate::config::HttpAuthSection {
+            url: "http://127.0.0.1:9080/authorize".into(),
+            client_ca_path: Some(file.0.clone()),
+            ..Default::default()
+        });
+        let router = crate::outbound::Router::load(&config.outbound).unwrap();
+        let tls = || TlsFingerprints {
+            identity: [0; 32],
+            ech: None,
+        };
+        let loaded = LoadedConfig::new(&config, None, tls(), router.files_digest()).unwrap();
+        let original = loaded.0.lock().unwrap().clone();
+        config.authorization.http.as_mut().unwrap().url = "http://127.0.0.1:9081/authorize".into();
+        std::fs::write(&file.0, "replacement CA bytes").unwrap();
+        let disk = sections(&original.key, &config, tls(), None).unwrap();
+        assert_ne!(
+            disk["client_authorities"].digest,
+            original.sections["client_authorities"].digest
+        );
+        assert!(!disk["client_authorities"].reloadable);
+        assert!(disk["http_authorization"].reloadable);
+        loaded.commit_reload(loaded.prepare_reload(&config, tls()).unwrap());
+        let updated = loaded.0.lock().unwrap();
+        assert_eq!(
+            updated.sections["client_authorities"].digest,
+            original.sections["client_authorities"].digest
+        );
+        assert_eq!(
+            updated.sections["http_authorization"].digest,
+            disk["http_authorization"].digest
         );
     }
 }

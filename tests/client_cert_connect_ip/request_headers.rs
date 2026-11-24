@@ -12,6 +12,7 @@ fn fixture(auth: bool) -> (TempDir, Client, std::net::TcpListener) {
     config.listeners[0].auth.enabled = auth;
     if auth {
         config.listeners[0].auth.mode = AuthMode::Basic;
+        config.listeners[0].auth.id = masque::config::Uuid::new_v4();
         config.listeners[0].auth.username = "test".into();
         config.listeners[0].auth.password_hash = "$argon2id$v=19$m=19456,t=2,p=1$1xNVXhqKU7jJ6cqTBJKphQ$GXXAINVTW1qhloFtN1IR8lSr7pI7QEY79fq4K6d8scQ".into();
     }

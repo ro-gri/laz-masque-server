@@ -666,9 +666,9 @@ impl Client {
             quiche::h3::Header::new(b":authority", b"proxy.example"),
             quiche::h3::Header::new(b":path", path.as_bytes()),
             quiche::h3::Header::new(b"capsule-protocol", b"?1"),
-            // These clients send an empty User-Agent, which has to survive
+            // These clients send an empty User-AuthorizationServer, which has to survive
             // QPACK and the server's header scan.
-            quiche::h3::Header::new(b"user-agent", b""),
+            quiche::h3::Header::new(b"user-authorizer", b""),
         ];
         headers.extend(
             credentials
@@ -804,6 +804,7 @@ fn fixture_with_retry_and_shards(tag: &str, retry_mode: QuicRetryMode, shards: u
         key_path,
         ephemeral_addr(),
         vec![ClientEntry {
+            id: uuid::Uuid::new_v4(),
             name: "laptop".into(),
             public_key: public_key_b64(&client_key),
             ipv4: Some(CLIENT_IPV4.into()),
@@ -891,6 +892,7 @@ fn dual_fixture_with_stealth(tag: &str, stealth: bool) -> DualFixture {
             tcp_targets: None,
             udp_targets: None,
             auth: AuthSection {
+                id: uuid::Uuid::new_v4(),
                 enabled: true,
                 mode: AuthMode::Basic,
                 stealth,
@@ -907,6 +909,7 @@ fn dual_fixture_with_stealth(tag: &str, stealth: bool) -> DualFixture {
             tcp_targets: None,
             udp_targets: None,
             auth: AuthSection {
+                id: uuid::Uuid::nil(),
                 enabled: true,
                 mode: AuthMode::ClientCert,
                 stealth: false,
@@ -917,6 +920,7 @@ fn dual_fixture_with_stealth(tag: &str, stealth: bool) -> DualFixture {
         },
     ];
     config.clients = vec![ClientEntry {
+        id: uuid::Uuid::new_v4(),
         name: "laptop".into(),
         public_key: public_key_b64(&client_key),
         ipv4: Some(CLIENT_IPV4.into()),
@@ -959,8 +963,10 @@ fn server_config_file(cert: &Path, key: &Path, clients: &[(&str, &str)]) -> Stri
         key.display()
     );
     for (name, public_key) in clients {
+        let digest = ring::digest::digest(&ring::digest::SHA256, public_key.as_bytes());
+        let id = uuid::Uuid::from_slice(&digest.as_ref()[..16]).unwrap();
         text.push_str(&format!(
-            "\n[[clients]]\nname = \"{name}\"\npublic_key = \"{public_key}\"\n"
+            "\n[[clients]]\nid = \"{id}\"\nname = \"{name}\"\npublic_key = \"{public_key}\"\n"
         ));
     }
     text
@@ -1019,7 +1025,7 @@ fn warm_basic_cache_is_revoked_on_an_established_http3_connection() {
         let hash = masque::auth::hash_password(password.as_bytes()).unwrap();
         server_config_file(&cert, &key_path, &[]).replace(
             "mode = \"client_cert\"",
-            &format!("mode = \"basic\"\nusername = \"alice\"\npassword_hash = \"{hash}\""),
+            &format!("mode = \"basic\"\nid = \"1a761548-cf17-4354-aecc-59f7a69ca254\"\nusername = \"alice\"\npassword_hash = \"{hash}\""),
         )
     };
     let config_path = dir.path().join("masque.toml");
@@ -1122,6 +1128,7 @@ fn ephemeral_multi_shard_listeners_share_only_their_own_port() {
             tcp_targets: None,
             udp_targets: None,
             auth: AuthSection {
+                id: uuid::Uuid::nil(),
                 enabled: false,
                 ..Default::default()
             },
@@ -1134,6 +1141,7 @@ fn ephemeral_multi_shard_listeners_share_only_their_own_port() {
             tcp_targets: None,
             udp_targets: None,
             auth: AuthSection {
+                id: uuid::Uuid::nil(),
                 enabled: false,
                 ..Default::default()
             },
@@ -2094,6 +2102,7 @@ fn http3_udp_capsules_handle_early_fragmented_data_and_small_response_windows() 
     config.tls.key_path = key_path;
     config.listeners[0].listen_addr = ephemeral_addr();
     config.listeners[0].shards = 1;
+    config.listeners[0].auth.id = masque::config::Uuid::new_v4();
     config.listeners[0].auth.username = BASIC_USERNAME.into();
     config.listeners[0].auth.password_hash =
         masque::auth::hash_password(BASIC_PASSWORD.as_bytes()).unwrap();
@@ -2753,6 +2762,7 @@ fn concurrent_initial_copies_reach_only_one_shard_owner() {
     );
     let mut config = server_config(cert, key_path, ephemeral_addr(), Vec::new());
     config.listeners[0].auth = AuthSection {
+        id: uuid::Uuid::nil(),
         enabled: false,
         ..Default::default()
     };
@@ -2832,6 +2842,7 @@ fn migrated_connections_stay_on_reuseport_owner() {
         server_key_path,
         ephemeral_addr(),
         vec![ClientEntry {
+            id: uuid::Uuid::new_v4(),
             name: "migrating-client".into(),
             public_key: public_key_b64(&client_key),
             ipv4: None,
@@ -2905,6 +2916,7 @@ fn migration_to_a_full_source_is_closed() {
         server_key_path,
         ephemeral_addr(),
         vec![ClientEntry {
+            id: uuid::Uuid::new_v4(),
             name: "limited-client".into(),
             public_key: public_key_b64(&client_key),
             ipv4: None,
@@ -3026,12 +3038,14 @@ fn exhausted_address_pool_returns_503_instead_of_an_early_200() {
         ephemeral_addr(),
         vec![
             ClientEntry {
+                id: uuid::Uuid::new_v4(),
                 name: "first".into(),
                 public_key: public_key_b64(&first_key),
                 ipv4: None,
                 ipv6: None,
             },
             ClientEntry {
+                id: uuid::Uuid::new_v4(),
                 name: "second".into(),
                 public_key: public_key_b64(&second_key),
                 ipv4: None,
@@ -3352,6 +3366,7 @@ fn all_basic_rejections_are_counted_once() {
     config.tls.key_path = key;
     config.listeners[0].listen_addr = ephemeral_addr();
     config.listeners[0].auth.enabled = true;
+    config.listeners[0].auth.id = masque::config::Uuid::new_v4();
     config.listeners[0].auth.username = "audit".into();
     config.listeners[0].auth.password_hash =
         masque::auth::hash_password(b"audit-test-secret").unwrap();
@@ -3446,6 +3461,7 @@ fn ech_http3_connect_ip_with_current_and_previous_keys_and_client_certificate() 
     let peer_key = p256_key();
     let peer_cert = self_signed(&peer_key, None);
     let entry = ClientEntry {
+        id: uuid::Uuid::new_v4(),
         name: "ech-peer".into(),
         public_key: public_key_b64(&peer_key),
         ipv4: Some(CLIENT_IPV4.into()),
@@ -3507,5 +3523,114 @@ fn ech_http3_connect_ip_with_current_and_previous_keys_and_client_certificate() 
         ));
         client.quic.close(true, 0, b"").unwrap();
         client.flush().unwrap();
+    }
+}
+
+#[path = "support/auth_server.rs"]
+mod auth_server;
+
+#[test]
+fn http_authorization_h3_basic_and_certificate_gate_connect_ip() {
+    use masque::config::{AuthBackend, HttpAuthSection};
+    for certificate in [false, true] {
+        let dir = TempDir::new("http-authorizer-h3");
+        let server_key = p256_key();
+        let (cert, key) = write_pem(
+            dir.path(),
+            "server",
+            &server_key,
+            &self_signed(&server_key, Some("localhost")),
+        );
+        let (ca, leaf, client_key) = auth_server::certificate_pair();
+        let ca_path = dir.path().join("ca.pem");
+        std::fs::write(&ca_path, ca.to_pem().unwrap()).unwrap();
+        let (client_cert, client_key_path) = write_pem(dir.path(), "client", &client_key, &leaf);
+        let permitted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let permission = permitted.clone();
+        let expected_key = STANDARD.encode(client_key.public_key_to_der().unwrap());
+        let authorizer = auth_server::AuthorizationServer::start(move |request| {
+            if certificate {
+                assert_eq!(request["type"], "client_cert");
+                assert_eq!(request["public_key"], expected_key);
+            } else {
+                assert_eq!(request["type"], "basic");
+                assert_eq!(request["username"], "alice");
+                assert_eq!(request["password"], "secret");
+            }
+            auth_server::Reply::json(
+                serde_json::json!({"ok":permission.load(std::sync::atomic::Ordering::Relaxed),"id":uuid::Uuid::new_v4()}),
+            )
+        });
+        let mut config = server_config(cert, key, ephemeral_addr(), Vec::new());
+        config.listeners[0].auth = masque::config::AuthSection {
+            mode: if certificate {
+                AuthMode::ClientCert
+            } else {
+                AuthMode::Basic
+            },
+            ..Default::default()
+        };
+        config.authorization = masque::config::AuthorizationSection {
+            backend: AuthBackend::Http,
+            http: Some(HttpAuthSection {
+                url: authorizer.url(),
+                client_ca_path: certificate.then_some(ca_path),
+                ..Default::default()
+            }),
+        };
+        let peer = spawn_server(config)[0];
+        if certificate {
+            let (_, stranger, stranger_key) = auth_server::certificate_pair();
+            let (stranger_cert, stranger_key_path) =
+                write_pem(dir.path(), "stranger", &stranger_key, &stranger);
+            let mut stranger = Client::connect(peer, &stranger_cert, &stranger_key_path).unwrap();
+            let handshake = stranger.handshake(Duration::from_secs(2));
+            if handshake.is_ok() {
+                let authorized = stranger
+                    .init_h3()
+                    .and_then(|_| stranger.send_connect_ip("connect-ip"))
+                    .and_then(|stream| stranger.response_status(stream, Duration::from_secs(2)));
+                assert!(!matches!(authorized, Ok(200)));
+            }
+            assert_eq!(authorizer.count(), 0);
+        }
+        let mut client = if certificate {
+            Client::connect(peer, &client_cert, &client_key_path).unwrap()
+        } else {
+            Client::connect_anonymous(peer).unwrap()
+        };
+        client.handshake(Duration::from_secs(5)).unwrap();
+        client.init_h3().unwrap();
+        let header = format!("Basic {}", STANDARD.encode("alice:secret"));
+        let credentials = (!certificate).then_some(header.as_str());
+        let stream = client
+            .send_connect_ip_with_credentials("connect-ip", credentials)
+            .unwrap();
+        assert_eq!(
+            client
+                .response_status(stream, Duration::from_secs(5))
+                .unwrap(),
+            404
+        );
+        permitted.store(true, std::sync::atomic::Ordering::Relaxed);
+        for _ in 0..2 {
+            let stream = client
+                .send_connect_ip_with_credentials("connect-ip", credentials)
+                .unwrap();
+            assert_eq!(
+                client
+                    .response_status(stream, Duration::from_secs(5))
+                    .unwrap(),
+                200
+            );
+            assert_eq!(client.capsules(stream, 2, Duration::from_secs(5)).len(), 2);
+        }
+        assert_eq!(authorizer.count(), 2);
+        assert_eq!(
+            authorizer
+                .connections
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
     }
 }
