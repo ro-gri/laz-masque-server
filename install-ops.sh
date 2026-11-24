@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-REPOSITORY=${MASQUE_GITHUB_REPOSITORY:-zenith-ent/masque-server}
+REPOSITORY=${MASQUE_GITHUB_REPOSITORY:-ro-gri/laz-masque-server}
 DOWNLOAD_DIR=
 STAGED_SKILL=
 BACKUP_DIR=
@@ -33,15 +33,15 @@ cleanup() {
     if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR" ]; then
         if [ -n "$SKILL_TARGET" ] &&
             [ ! -e "$SKILL_TARGET" ] && [ ! -L "$SKILL_TARGET" ] &&
-            [ -e "$BACKUP_DIR/masque-ops" ]; then
-            mv -- "$BACKUP_DIR/masque-ops" "$SKILL_TARGET" || true
+            [ -e "$BACKUP_DIR/laz-masque-ops" ]; then
+            mv -- "$BACKUP_DIR/laz-masque-ops" "$SKILL_TARGET" || true
         fi
-        if [ ! -e "$BACKUP_DIR/masque-ops" ]; then
+        if [ ! -e "$BACKUP_DIR/laz-masque-ops" ]; then
             rm -rf -- "$BACKUP_DIR"
         elif [ -e "$SKILL_TARGET" ] || [ -L "$SKILL_TARGET" ]; then
             rm -rf -- "$BACKUP_DIR"
         else
-            echo "warning: previous Skill retained at $BACKUP_DIR/masque-ops" >&2
+            echo "warning: previous Skill retained at $BACKUP_DIR/laz-masque-ops" >&2
         fi
     fi
     if [ -n "$DOWNLOAD_DIR" ] && [ -d "$DOWNLOAD_DIR" ]; then
@@ -94,25 +94,26 @@ else
     esac
 fi
 
+# GitHub may percent-encode '+' in the latest-release redirect.
+RELEASE_TAG=$(printf '%s' "$RELEASE_TAG" | sed 's/%2[Bb]/+/g')
 case "$RELEASE_TAG" in
-    v[0-9A-Za-z]*) ;;
-    *) die "invalid release tag: $RELEASE_TAG" ;;
+    *[!0-9A-Za-z.+-]*) die "invalid release tag: $RELEASE_TAG" ;;
 esac
-case "$RELEASE_TAG" in
-    *[!0-9A-Za-z._-]*) die "invalid release tag: $RELEASE_TAG" ;;
-esac
+if ! printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+    die "invalid release tag: $RELEASE_TAG"
+fi
 
 VERSION=${RELEASE_TAG#v}
-ARCHIVE_NAME=masque-ops-v${VERSION}.tar.gz
+ARCHIVE_NAME=laz-masque-ops-v${VERSION}.tar.gz
 CHECKSUM_NAME=$ARCHIVE_NAME.sha256
 DOWNLOAD_BASE=https://github.com/$REPOSITORY/releases/download/$RELEASE_TAG
 
-DOWNLOAD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/masque-ops-install.XXXXXX")
+DOWNLOAD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/laz-masque-ops-install.XXXXXX")
 chmod 0700 "$DOWNLOAD_DIR"
 ARCHIVE_PATH=$DOWNLOAD_DIR/$ARCHIVE_NAME
 CHECKSUM_PATH=$DOWNLOAD_DIR/$CHECKSUM_NAME
 
-echo "Downloading masque-ops $RELEASE_TAG ..."
+echo "Downloading laz-masque-ops $RELEASE_TAG ..."
 curl -fL --retry 3 -o "$ARCHIVE_PATH" "$DOWNLOAD_BASE/$ARCHIVE_NAME"
 curl -fL --retry 3 -o "$CHECKSUM_PATH" "$DOWNLOAD_BASE/$CHECKSUM_NAME"
 
@@ -130,9 +131,9 @@ if tar tzf "$ARCHIVE_PATH" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
 fi
 tar xzf "$ARCHIVE_PATH" -C "$DOWNLOAD_DIR"
 
-PACKAGE_DIR=$DOWNLOAD_DIR/masque-ops-v${VERSION}
-CANDIDATE_SKILL=$PACKAGE_DIR/skills/masque-ops
-CANDIDATE_CLI=$CANDIDATE_SKILL/scripts/masque-ops.py
+PACKAGE_DIR=$DOWNLOAD_DIR/laz-masque-ops-v${VERSION}
+CANDIDATE_SKILL=$PACKAGE_DIR/skills/laz-masque-ops
+CANDIDATE_CLI=$CANDIDATE_SKILL/scripts/laz-masque-ops.py
 [ -r "$CANDIDATE_SKILL/SKILL.md" ] || die "the archive does not contain the Skill"
 [ -x "$CANDIDATE_CLI" ] || die "the archive does not contain the operations CLI"
 [ -x "$CANDIDATE_SKILL/scripts/install-latest.sh" ] ||
@@ -142,7 +143,7 @@ CANDIDATE_CLI=$CANDIDATE_SKILL/scripts/masque-ops.py
 CANDIDATE_VERSION=$(awk 'NF { print $1; exit }' "$CANDIDATE_SKILL/VERSION")
 [ "$CANDIDATE_VERSION" = "$VERSION" ] ||
     die "the bundled Skill version does not match $RELEASE_TAG"
-[ "$("$PYTHON" "$CANDIDATE_CLI" --version)" = "masque-ops $VERSION" ] ||
+[ "$("$PYTHON" "$CANDIDATE_CLI" --version)" = "laz-masque-ops $VERSION" ] ||
     die "the downloaded operations CLI cannot run or has the wrong version"
 
 HOME_DIR=${HOME:?HOME is required}
@@ -158,7 +159,7 @@ elif [ "$(id -u)" -eq 0 ]; then
 else
     BIN_DIR=$HOME_DIR/.local/bin
 fi
-CONFIG_DIR=${MASQUE_OPS_CONFIG_DIR:-$HOME_DIR/.config/masque-server}
+CONFIG_DIR=${MASQUE_OPS_CONFIG_DIR:-$HOME_DIR/.config/laz-masque-server}
 for destination in "$SKILLS_DIR" "$BIN_DIR" "$CONFIG_DIR"; do
     case "$destination" in
         /*) ;;
@@ -176,15 +177,15 @@ ensure_directory "$SKILLS_DIR" 0755 "Skill installation directory"
 ensure_directory "$BIN_DIR" 0755 "CLI installation directory"
 ensure_directory "$CONFIG_DIR" 0700 "operations configuration directory"
 chmod 0700 "$CONFIG_DIR"
-SKILL_TARGET=$SKILLS_DIR/masque-ops
-if [ -e "$BIN_DIR/masque-ops" ] &&
-    [ ! -f "$BIN_DIR/masque-ops" ] && [ ! -L "$BIN_DIR/masque-ops" ]; then
-    die "$BIN_DIR/masque-ops exists and is not a file or symbolic link"
+SKILL_TARGET=$SKILLS_DIR/laz-masque-ops
+if [ -e "$BIN_DIR/laz-masque-ops" ] &&
+    [ ! -f "$BIN_DIR/laz-masque-ops" ] && [ ! -L "$BIN_DIR/laz-masque-ops" ]; then
+    die "$BIN_DIR/laz-masque-ops exists and is not a file or symbolic link"
 fi
 
-STAGED_SKILL=$(mktemp -d "$SKILLS_DIR/.masque-ops.install.XXXXXX")
+STAGED_SKILL=$(mktemp -d "$SKILLS_DIR/.laz-masque-ops.install.XXXXXX")
 cp -R "$CANDIDATE_SKILL/." "$STAGED_SKILL/"
-chmod 0755 "$STAGED_SKILL/scripts/masque-ops.py" \
+chmod 0755 "$STAGED_SKILL/scripts/laz-masque-ops.py" \
     "$STAGED_SKILL/scripts/install-latest.sh" \
     "$STAGED_SKILL/scripts/install-probe.sh"
 
@@ -197,21 +198,21 @@ if [ "$INSTALL_PROBE" = 1 ]; then
 fi
 
 if [ -e "$SKILL_TARGET" ] || [ -L "$SKILL_TARGET" ]; then
-    BACKUP_DIR=$(mktemp -d "$SKILLS_DIR/.masque-ops.backup.XXXXXX")
-    mv -- "$SKILL_TARGET" "$BACKUP_DIR/masque-ops"
+    BACKUP_DIR=$(mktemp -d "$SKILLS_DIR/.laz-masque-ops.backup.XXXXXX")
+    mv -- "$SKILL_TARGET" "$BACKUP_DIR/laz-masque-ops"
 fi
 if ! mv -- "$STAGED_SKILL" "$SKILL_TARGET"; then
-    if [ -n "$BACKUP_DIR" ] && [ -e "$BACKUP_DIR/masque-ops" ]; then
-        mv -- "$BACKUP_DIR/masque-ops" "$SKILL_TARGET"
+    if [ -n "$BACKUP_DIR" ] && [ -e "$BACKUP_DIR/laz-masque-ops" ]; then
+        mv -- "$BACKUP_DIR/laz-masque-ops" "$SKILL_TARGET"
     fi
     die "could not activate the downloaded Skill"
 fi
 STAGED_SKILL=
 
-LINK_TMP=$(mktemp "$BIN_DIR/.masque-ops.link.XXXXXX")
+LINK_TMP=$(mktemp "$BIN_DIR/.laz-masque-ops.link.XXXXXX")
 rm -f -- "$LINK_TMP"
-ln -s "$SKILL_TARGET/scripts/masque-ops.py" "$LINK_TMP"
-mv -f -- "$LINK_TMP" "$BIN_DIR/masque-ops"
+ln -s "$SKILL_TARGET/scripts/laz-masque-ops.py" "$LINK_TMP"
+mv -f -- "$LINK_TMP" "$BIN_DIR/laz-masque-ops"
 LINK_TMP=
 
 EXAMPLE_TARGET=$CONFIG_DIR/fleet.example.toml
@@ -226,11 +227,11 @@ fi
 BACKUP_DIR=
 
 echo "Verified SHA-256: $ACTUAL_SHA256"
-echo "Installed masque-ops $VERSION at $BIN_DIR/masque-ops"
+echo "Installed laz-masque-ops $VERSION at $BIN_DIR/laz-masque-ops"
 echo "Installed Codex Skill at $SKILL_TARGET"
 echo "$EXAMPLE_RESULT"
 case ":${PATH:-}:" in
     *":$BIN_DIR:"*) ;;
-    *) echo "Add $BIN_DIR to PATH before invoking masque-ops directly." ;;
+    *) echo "Add $BIN_DIR to PATH before invoking laz-masque-ops directly." ;;
 esac
-echo "Restart Codex to discover the installed Skill, then invoke \$masque-ops."
+echo "Restart Codex to discover the installed Skill, then invoke \$laz-masque-ops."

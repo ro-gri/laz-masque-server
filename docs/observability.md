@@ -1,6 +1,6 @@
 # Observability
 
-MASQUE Server can expose a small HTTP/1 operational endpoint independently of
+Laz MASQUE Server can expose a small HTTP/1 operational endpoint independently of
 its HTTP/2 and HTTP/3 proxy listeners. It is disabled unless configured and is restricted
 to an IPv4 or IPv6 loopback address because it has no authentication layer.
 
@@ -48,7 +48,7 @@ curl --fail http://127.0.0.1:9090/metrics
 ## Prometheus
 
 The installer does not install or start Prometheus or Grafana. It only writes
-optional rule and dashboard files; a lightweight VPS can run masque-server by
+optional rule and dashboard files; a lightweight VPS can run laz-masque-server by
 itself and leave `[observability]` disabled. If collection is desired, run the
 collector elsewhere and reach loopback through an authenticated tunnel.
 
@@ -57,7 +57,7 @@ host:
 
 ```yaml
 scrape_configs:
-  - job_name: masque-server
+  - job_name: laz-masque-server
     static_configs:
       - targets: ["127.0.0.1:9090"]
 ```
@@ -65,7 +65,7 @@ scrape_configs:
 The packaged rules are installed at:
 
 ```text
-/usr/local/share/masque-server/monitoring/prometheus-rules.yml
+/usr/local/share/laz-masque-server/monitoring/prometheus-rules.yml
 ```
 
 Reference that file from Prometheus' [`rule_files` setting](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#rule_files)
@@ -73,7 +73,7 @@ and validate it with `promtool check rules` before reloading Prometheus. The
 rules cover prolonged not-ready state, connection-limit rejection,
 authentication overload and high failure ratios, sustained internal queue
 drops, and forced shutdown. Alert on Prometheus' own
-`up{job="masque-server"} == 0` as well; an application cannot emit a metric
+`up{job="laz-masque-server"} == 0` as well; an application cannot emit a metric
 after its process or host disappears.
 
 ## Grafana
@@ -81,7 +81,7 @@ after its process or host disappears.
 The installer writes an importable classic dashboard JSON to:
 
 ```text
-/usr/local/share/masque-server/monitoring/grafana-dashboard.json
+/usr/local/share/laz-masque-server/monitoring/grafana-dashboard.json
 ```
 
 Import it in Grafana and select the Prometheus data source when prompted. The
@@ -166,7 +166,7 @@ Text logs remain the default. Use newline-delimited structured logs when a
 collector expects JSON:
 
 ```sh
-masque-server --log-format json --config /etc/masque/masque.toml
+laz-masque-server --log-format json --config /etc/masque/masque.toml
 ```
 
 `RUST_LOG` and `-v` keep their existing filtering behavior. For the packaged

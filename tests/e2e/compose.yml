@@ -13,7 +13,7 @@ services:
       context: ../..
       dockerfile: Dockerfile
     entrypoint: ["/entrypoint.sh"]
-    command: ["-c", "/config/masque-e2e.toml", "-vv"]
+    command: ["-c", "/config/laz-masque-e2e.toml", "-vv"]
     cap_add:
       - NET_ADMIN
     devices:
@@ -22,7 +22,7 @@ services:
       - net.ipv4.ip_forward=1
     volumes:
       - ../../certs:/certs:ro
-      - ./masque-e2e.toml:/config/masque-e2e.toml:ro
+      - ./laz-masque-e2e.toml:/config/laz-masque-e2e.toml:ro
       - ./server-entrypoint.sh:/entrypoint.sh:ro
     depends_on:
       - echo
@@ -39,7 +39,7 @@ services:
       ECHO_SERVER_ADDR: "172.28.0.10:9999"
       MASQUE_USERNAME: "test"
       MASQUE_PASSWORD: "test-password"
-      RUST_LOG: "masque_e2e=debug"
+      RUST_LOG: "laz_masque_e2e=debug"
     depends_on:
       - server
       - echo

@@ -16,8 +16,11 @@ esac
 
 release_version=${release_tag#v}
 case "$release_version" in
-    ""|*[!0-9A-Za-z.+-]*) die "invalid release version: $release_version" ;;
+    *[!0-9A-Za-z.+-]*) die "invalid release version: $release_version" ;;
 esac
+if ! printf '%s\n' "$release_version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?\+masque\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+    die "expected v<version>+masque.<upstream-version>: $release_tag"
+fi
 
 manifest_path=${MASQUE_RELEASE_MANIFEST:-Cargo.toml}
 lock_path=${MASQUE_RELEASE_LOCK:-Cargo.lock}
@@ -44,7 +47,7 @@ manifest_version=$(awk '
 
 lock_version=$(awk '
     /^\[\[package\]\]$/ { target=0; next }
-    /^name = "masque-server"$/ { target=1; next }
+    /^name = "laz-masque-server"$/ { target=1; next }
     target && /^version = / {
         value=$3
         gsub(/"/, "", value)
@@ -52,7 +55,7 @@ lock_version=$(awk '
         exit
     }
 ' "$lock_path")
-[ -n "$lock_version" ] || die "could not find masque-server in $lock_path"
+[ -n "$lock_version" ] || die "could not find laz-masque-server in $lock_path"
 [ "$lock_version" = "$release_version" ] ||
     die "tag $release_tag does not match lockfile version $lock_version"
 

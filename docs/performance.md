@@ -1,5 +1,8 @@
 # Performance
 
+Historical measurements and release versions below refer to upstream MASQUE
+Server before this fork; they are not measurements of Laz MASQUE Server 0.1.0.
+
 ## What is measured
 
 Performance results must distinguish:
@@ -624,12 +627,12 @@ on Linux; the normal HTTP/3 case supplies the both-disabled control.
 performance conclusion. `--cc cubic|reno|bbr2` holds the chosen congestion
 controller constant throughout a run.
 
-Compare two compatible MASQUE Server builds with one identical client:
+Compare two compatible Laz MASQUE Server builds with one identical client:
 
 ```sh
 python3 scripts/performance-baseline.py \
   --bin-dir target/release \
-  --reference-server /private/benchmark/reference/masque-server \
+  --reference-server /private/benchmark/reference/laz-masque-server \
   --rounds 3 --duration 10 \
   --output /private/benchmark/comparison
 ```
@@ -639,7 +642,7 @@ directory must be new and outside the checkout. The runner alternates A/B
 order and reverses workload order on alternate rounds. It clears inherited
 `MASQUE_*` settings, so an ambient endpoint, interface, or authentication setting
 cannot redirect the local test. `--bin-dir` skips rebuilding; both server
-binaries must accept the same MASQUE Server benchmark configuration.
+binaries must accept the same Laz MASQUE Server benchmark configuration.
 
 The private `report.json` includes binary SHA-256 values, workload settings,
 raw numeric records, medians and ranges, and optional A/B comparisons. It omits
@@ -735,7 +738,7 @@ During a controlled run:
 
 ```sh
 sudo strace -f -c -e trace=sendmmsg,sendmsg,recvmmsg \
-  -p "$(pidof masque-server)"
+  -p "$(pidof laz-masque-server)"
 ```
 
 The musl binary should show `sendmmsg` and `recvmmsg` on active UDP paths.

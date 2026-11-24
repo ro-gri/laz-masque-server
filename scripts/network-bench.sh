@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 
 BENCH_DIR="$(mktemp -d "${TMPDIR:-/tmp}/masque-network-bench.XXXXXX")"
 BIN_DIR="${MASQUE_BENCH_BIN_DIR:-target/release}"
-SERVER_BIN="${MASQUE_BENCH_SERVER_BIN:-$BIN_DIR/masque-server}"
+SERVER_BIN="${MASQUE_BENCH_SERVER_BIN:-$BIN_DIR/laz-masque-server}"
 RESULTS_DIR="${MASQUE_BENCH_RESULTS_DIR:-}"
 PERF_BIN="${MASQUE_BENCH_PERF_BIN:-perf}"
 PERF_PID=""
@@ -340,7 +340,7 @@ esac
 if [ -z "${MASQUE_BENCH_BIN_DIR:-}" ]; then
     cargo build --workspace --release
 fi
-[ -x "$BIN_DIR/masque-e2e" ] || { echo "missing benchmark client executable" >&2; exit 2; }
+[ -x "$BIN_DIR/laz-masque-e2e" ] || { echo "missing benchmark client executable" >&2; exit 2; }
 [ -x "$SERVER_BIN" ] || { echo "benchmark server is not executable" >&2; exit 2; }
 printf 'BENCH_CONFIG transport=%s cc=%s shards=%s quic_gso=%s quic_gro=%s target_gso=%s load_warm_auth=%s udp_recv_buffer_size=%s udp_send_buffer_size=%s\n' \
     "$BENCH_TRANSPORT" "$BENCH_CC" "$BENCH_SHARDS" "$QUIC_GSO_TOML" "$QUIC_GRO_TOML" "$TARGET_GSO_TOML" "${MASQUE_LOAD_WARM_AUTH:-1}" \
@@ -373,7 +373,7 @@ case "$BENCH_MODE" in
     all|smoke|udp|load|mixed)
         MASQUE_ECHO_SERVER_ADDR="127.0.0.1:$ECHO_PORT" \
         RUST_LOG=warn \
-        "$BIN_DIR/masque-e2e" >"$BENCH_DIR/echo.log" 2>&1 &
+        "$BIN_DIR/laz-masque-e2e" >"$BENCH_DIR/echo.log" 2>&1 &
         ECHO_PID=$!
         ;;
 esac
@@ -410,7 +410,7 @@ case "$BENCH_MODE" in
             MASQUE_SERVER_ADDR="127.0.0.1:$SERVER_PORT" \
             ECHO_SERVER_ADDR="127.0.0.1:$ECHO_PORT" \
             RUST_LOG=warn \
-            "$BIN_DIR/masque-e2e"
+            "$BIN_DIR/laz-masque-e2e"
 
             MASQUE_TCP_CHECK=1 \
             MASQUE_BENCH_TRANSPORT="$transport" \
@@ -419,7 +419,7 @@ case "$BENCH_MODE" in
             MASQUE_USERNAME=test \
             MASQUE_PASSWORD=test-password \
             RUST_LOG=warn \
-            "$BIN_DIR/masque-e2e"
+            "$BIN_DIR/laz-masque-e2e"
 
             MASQUE_UDP_CHECK=1 \
             MASQUE_BENCH_TRANSPORT="$transport" \
@@ -428,7 +428,7 @@ case "$BENCH_MODE" in
             MASQUE_USERNAME=test \
             MASQUE_PASSWORD=test-password \
             RUST_LOG=warn \
-            "$BIN_DIR/masque-e2e"
+            "$BIN_DIR/laz-masque-e2e"
 
             if [ "$transport" = http3 ]; then
                 MASQUE_MIGRATION_CHECK=1 \
@@ -438,7 +438,7 @@ case "$BENCH_MODE" in
                 MASQUE_USERNAME=test \
                 MASQUE_PASSWORD=test-password \
                 RUST_LOG=warn \
-                "$BIN_DIR/masque-e2e"
+                "$BIN_DIR/laz-masque-e2e"
             fi
         done
         ;;
@@ -456,7 +456,7 @@ case "$BENCH_MODE" in
             MASQUE_USERNAME=test \
             MASQUE_PASSWORD=test-password \
             RUST_LOG=warn \
-            "$BIN_DIR/masque-e2e"
+            "$BIN_DIR/laz-masque-e2e"
         done
         ;;
 esac
@@ -471,7 +471,7 @@ case "$BENCH_MODE" in
             MASQUE_USERNAME=test \
             MASQUE_PASSWORD=test-password \
             RUST_LOG=warn \
-            "$BIN_DIR/masque-e2e"
+            "$BIN_DIR/laz-masque-e2e"
         done
         ;;
 esac
@@ -484,12 +484,12 @@ if [ "$BENCH_MODE" = load ] || {
             MASQUE_UDP_CHECK=1 MASQUE_BENCH_TRANSPORT="$transport" \
             MASQUE_SERVER_ADDR="127.0.0.1:$SERVER_PORT" ECHO_SERVER_ADDR="127.0.0.1:$ECHO_PORT" \
             MASQUE_USERNAME=test MASQUE_PASSWORD=test-password RUST_LOG=warn \
-            "$BIN_DIR/masque-e2e"
+            "$BIN_DIR/laz-masque-e2e"
         fi
         MASQUE_LOAD=1 MASQUE_BENCH_TRANSPORT="$transport" \
         MASQUE_SERVER_ADDR="127.0.0.1:$SERVER_PORT" ECHO_SERVER_ADDR="127.0.0.1:$ECHO_PORT" \
         MASQUE_USERNAME=test MASQUE_PASSWORD=test-password RUST_LOG=warn \
-        "$BIN_DIR/masque-e2e"
+        "$BIN_DIR/laz-masque-e2e"
     done
 fi
 
@@ -501,7 +501,7 @@ if [ "$BENCH_MODE" = mixed ]; then
     MASQUE_USERNAME=test \
     MASQUE_PASSWORD=test-password \
     RUST_LOG=warn \
-    "$BIN_DIR/masque-e2e"
+    "$BIN_DIR/laz-masque-e2e"
 fi
 
 kill -0 "$SERVER_PID" 2>/dev/null || { echo "benchmark server exited during measurement" >&2; exit 1; }

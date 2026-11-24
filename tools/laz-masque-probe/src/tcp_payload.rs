@@ -97,7 +97,7 @@ impl TcpExchange {
                 )?);
             }
             TcpMode::Echo => {
-                exchange.echo = b"masque-probe-tcp-".to_vec();
+                exchange.echo = b"laz-masque-probe-tcp-".to_vec();
                 let mut nonce = [0; 32];
                 ring::rand::SystemRandom::new()
                     .fill(&mut nonce)

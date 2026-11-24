@@ -20,7 +20,7 @@ use report::{CheckResult, ProbeFailure, ProbeReport};
 
 #[derive(Parser)]
 #[command(
-    name = "masque-probe",
+    name = "laz-masque-probe",
     version,
     about = "Diagnose a MASQUE endpoint from the client network"
 )]
@@ -552,7 +552,7 @@ mod tests {
 
     #[test]
     fn default_targets_are_public_and_well_formed() {
-        let cli = Cli::parse_from(["masque-probe", "proxy.example:443"]);
+        let cli = Cli::parse_from(["laz-masque-probe", "proxy.example:443"]);
         assert!(Authority::parse(&cli.tcp_target, "target").is_ok());
         assert!(Authority::parse(&cli.udp_target, "target").is_ok());
         assert_eq!(cli.transport, Transport::Auto);

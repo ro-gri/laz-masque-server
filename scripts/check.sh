@@ -7,7 +7,7 @@ quick() {
     cargo fmt --all --check
     # Check each file individually with the interpreter named by its shebang.
     for script in install-latest.sh install-ops.sh install-probe.sh \
-        deploy/install.sh deploy/masque-maintain scripts/*.sh tests/*.sh tests/e2e/*.sh; do
+        deploy/install.sh deploy/laz-masque-maintain scripts/*.sh tests/*.sh tests/e2e/*.sh; do
         case "$(head -n 1 "$script")" in
             *bash) bash -n "$script" ;;
             *) sh -n "$script" ;;
@@ -19,7 +19,8 @@ quality() {
     quick
     cargo clippy --workspace --all-targets --locked -- -D warnings
     shellcheck install-latest.sh install-ops.sh install-probe.sh \
-        deploy/install.sh deploy/masque-maintain scripts/*.sh tests/*.sh tests/e2e/*.sh
+        deploy/install.sh deploy/laz-masque-maintain scripts/*.sh tests/*.sh tests/e2e/*.sh
+    sh tests/install-latest.sh
     sh tests/install-ops.sh
     sh tests/install-probe.sh
     sh tests/release-metadata.sh

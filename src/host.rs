@@ -189,7 +189,7 @@ fn diagnose_startup_with(config: &IpProxySection, probe: &impl HostProbe) -> Hos
         report.push(
             DiagnosticLevel::Warning,
             "host egress",
-            "routing, firewall forwarding, and optional NAT are operator-managed and not verified during service startup; run `masque-server doctor`",
+            "routing, firewall forwarding, and optional NAT are operator-managed and not verified during service startup; run `laz-masque-server doctor`",
         );
     }
     report
@@ -268,7 +268,7 @@ fn diagnose_with(config: &IpProxySection, probe: &impl HostProbe) -> HostDiagnos
     report.push(
         DiagnosticLevel::Info,
         "ownership",
-        "diagnostics are read-only; masque-server never changes host routing, firewall, or NAT",
+        "diagnostics are read-only; laz-masque-server never changes host routing, firewall, or NAT",
     );
     report
 }
@@ -664,7 +664,7 @@ mod tests {
         assert!(!report.has_errors(), "{report:#?}");
         assert_eq!(report.warning_count(), 1, "{report:#?}");
         assert!(report.checks().iter().any(|check| {
-            check.name == "host egress" && check.detail.contains("masque-server doctor")
+            check.name == "host egress" && check.detail.contains("laz-masque-server doctor")
         }));
     }
 

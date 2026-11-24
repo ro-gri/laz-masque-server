@@ -944,7 +944,7 @@ fn auth_label(auth: &AuthSection) -> &'static str {
 /// beside `mode = "client_cert"` would look like a live Basic credential to
 /// whoever reads the file next.
 pub fn listener_toml_block(listener: &ListenerSection) -> String {
-    let mut block = String::from("# Added by `masque-server add-listener`.\n");
+    let mut block = String::from("# Added by `laz-masque-server add-listener`.\n");
     block.push_str("[[listeners]]\n");
     block.push_str(&format!(
         "listen_addr = {}\n",
@@ -1518,7 +1518,7 @@ impl EditLock {
             let error = std::io::Error::last_os_error();
             if error.kind() == std::io::ErrorKind::WouldBlock {
                 bail!(
-                    "another masque-server is editing {}; finish or cancel it first",
+                    "another laz-masque-server is editing {}; finish or cancel it first",
                     config_path.display()
                 );
             }
@@ -1839,7 +1839,7 @@ password_hash = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$hash"
         assert!(
             error
                 .to_string()
-                .contains("another masque-server is editing"),
+                .contains("another laz-masque-server is editing"),
             "unexpected error: {error}"
         );
 

@@ -113,63 +113,7 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: masque-server-linux-${{ matrix.arch }}
-          path: dist/*
-          if-no-files-found: error
-
-  build-probe-macos:
-    name: Build macOS probe ${{ matrix.arch }}
-    needs: verify
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: aarch64
-            target: aarch64-apple-darwin
-            runner: macos-15
-          - arch: x86_64
-            target: x86_64-apple-darwin
-            runner: macos-15-intel
-    env:
-      MACOSX_DEPLOYMENT_TARGET: "11.0"
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install Rust target
-        run: |
-          rustup toolchain install 1.97.1 --profile minimal
-          rustup default 1.97.1
-          rustup target add "${{ matrix.target }}"
-
-      - name: Restore Cargo cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-1.97.1-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            cargo-${{ runner.os }}-${{ runner.arch }}-1.97.1-${{ matrix.target }}-
-
-      - name: Build standalone probe archive
-        env:
-          TARGET: ${{ matrix.target }}
-          ARCH: ${{ matrix.arch }}
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            export VERSION="${GITHUB_REF_NAME#v}"
-          else
-            export VERSION="${GITHUB_SHA::12}"
-          fi
-          scripts/package-probe.sh
-
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: masque-probe-macos-${{ matrix.arch }}
+          name: laz-masque-server-linux-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
 
@@ -187,14 +131,14 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: masque-ops
+          name: laz-masque-ops
           path: dist/*
           if-no-files-found: error
 
   publish:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, build-probe-macos, build-ops]
+    needs: [build, build-ops]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -205,7 +149,7 @@ jobs:
       - name: Download release archives
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: masque-*
+          pattern: laz-masque-*
           path: dist
           merge-multiple: true
 

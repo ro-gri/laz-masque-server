@@ -20,10 +20,7 @@ concurrency:
 jobs:
   quality:
     name: Format, Clippy, and scripts
-    # Pull requests get the complete source-level validation. A protected main
-    # branch has already passed these checks on its tested merge commit, so its
-    # push run only needs to exercise the release packaging path below.
-    if: github.event_name != 'push'
+    # Validate direct pushes to main as well as pull requests.
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -56,7 +53,6 @@ jobs:
 
   msrv:
     name: Check MSRV (1.88.0)
-    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -86,7 +82,6 @@ jobs:
 
   test:
     name: Test (${{ matrix.os }})
-    if: github.event_name != 'push'
     strategy:
       fail-fast: false
       matrix:
@@ -125,7 +120,7 @@ jobs:
 
       - name: Test systemd shutdown signals
         if: runner.os == 'Linux'
-        run: MASQUE_TEST_BIN="$PWD/target/debug/masque-server" tests/systemd-shutdown.sh
+        run: MASQUE_TEST_BIN="$PWD/target/debug/laz-masque-server" tests/systemd-shutdown.sh
 
       - name: Test installer upgrade safety
         if: runner.os == 'Linux'
@@ -133,8 +128,8 @@ jobs:
           sudo env \
             CI=true \
             MASQUE_INSTALLER_TEST=1 \
-            MASQUE_TEST_PACKAGE_BIN="$PWD/target/debug/masque-server" \
-            MASQUE_TEST_PACKAGE_PROBE="$PWD/target/debug/masque-probe" \
+            MASQUE_TEST_PACKAGE_BIN="$PWD/target/debug/laz-masque-server" \
+            MASQUE_TEST_PACKAGE_PROBE="$PWD/target/debug/laz-masque-probe" \
             "$PWD/tests/install-upgrade.sh"
 
   release-build:
@@ -195,10 +190,10 @@ jobs:
 
       - name: Inspect archive
         run: |
-          tar tzf "dist/masque-vci-${GITHUB_SHA}-linux-${{ matrix.arch }}.tar.gz"
-          tar tzf "dist/masque-probe-vci-${GITHUB_SHA}-linux-${{ matrix.arch }}.tar.gz"
+          tar tzf "dist/laz-masque-server-vci-${GITHUB_SHA}-linux-${{ matrix.arch }}.tar.gz"
+          tar tzf "dist/laz-masque-probe-vci-${GITHUB_SHA}-linux-${{ matrix.arch }}.tar.gz"
           cd dist
           sha256sum --check \
-            "masque-vci-${GITHUB_SHA}-linux-${{ matrix.arch }}.tar.gz.sha256"
+            "laz-masque-server-vci-${GITHUB_SHA}-linux-${{ matrix.arch }}.tar.gz.sha256"
           sha256sum --check \
-            "masque-probe-vci-${GITHUB_SHA}-linux-${{ matrix.arch }}.tar.gz.sha256"
+            "laz-masque-probe-vci-${GITHUB_SHA}-linux-${{ matrix.arch }}.tar.gz.sha256"

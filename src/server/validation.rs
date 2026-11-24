@@ -227,7 +227,7 @@ pub(super) fn active_client_registry(
     if clients.is_empty() {
         anyhow::bail!(
             "listener auth.mode = \"client_cert\" needs at least one [[clients]] entry; \
-             run `masque-server enroll-client` to create one"
+             run `laz-masque-server enroll-client` to create one"
         );
     }
     Ok(clients)

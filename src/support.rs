@@ -177,7 +177,7 @@ pub fn collect(
         schema_version: 1,
         generated_at_unix_seconds,
         application: ApplicationSummary {
-            name: "masque-server",
+            name: "laz-masque-server",
             version: env!("CARGO_PKG_VERSION"),
         },
         host: HostSummary {
@@ -336,7 +336,7 @@ pub async fn print_status(
     key_override: Option<&Path>,
     status_socket: &Path,
 ) -> anyhow::Result<()> {
-    println!("masque-server {}", env!("CARGO_PKG_VERSION"));
+    println!("laz-masque-server {}", env!("CARGO_PKG_VERSION"));
     let service = systemd_summary();
     println!(
         "systemd service: {} ({})",
@@ -421,7 +421,7 @@ fn last_reload_result() -> Option<&'static str> {
         "systemctl",
         &[
             "show",
-            "masque.service",
+            "laz-masque.service",
             "--property=InvocationID",
             "--value",
         ],
@@ -484,7 +484,7 @@ fn systemd_summary() -> SystemdSummary {
     let output = Command::new("systemctl")
         .args([
             "show",
-            "masque.service",
+            "laz-masque.service",
             "--no-pager",
             "--property=LoadState",
             "--property=ActiveState",

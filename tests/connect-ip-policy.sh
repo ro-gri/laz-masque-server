@@ -13,7 +13,7 @@ case "${MASQUE_IP_TEST_TUN_OFFLOAD:-1}" in
     1) offload=true ;;
     *) echo 'MASQUE_IP_TEST_TUN_OFFLOAD must be 0 or 1' >&2; exit 2 ;;
 esac
-[ -x "$bin/masque-server" ] && [ -x "$bin/masque-probe" ] || exit 2
+[ -x "$bin/laz-masque-server" ] && [ -x "$bin/laz-masque-probe" ] || exit 2
 tmp="$(mktemp -d /tmp/masque-ip-policy.XXXXXX)"
 server_pid=''
 echo_pid=''
@@ -72,7 +72,7 @@ transport = "http2"
 [listeners.auth]
 enabled = false
 CONFIG
-    "$bin/masque-server" --config "$tmp/config.toml" --status-socket "$tmp/status.sock" >"$tmp/server.log" 2>&1 &
+    "$bin/laz-masque-server" --config "$tmp/config.toml" --status-socket "$tmp/status.sock" >"$tmp/server.log" 2>&1 &
     server_pid=$!
     for ((attempt=0; attempt<100; attempt++)); do
         [ ! -S "$tmp/status.sock" ] || return 0
@@ -86,7 +86,7 @@ CONFIG
 probe_ip() {
     local transport="$1" target="$2" expected="$3" family="$4"
     local result=0
-    "$bin/masque-probe" 127.0.0.1:4433 --insecure --transport "$transport" \
+    "$bin/laz-masque-probe" 127.0.0.1:4433 --insecure --transport "$transport" \
         --skip-tcp --skip-udp --connect-ip --ip-mode echo --ip-target "$target" \
         --timeout 2 --json >"$tmp/probe.json" || result=$?
     python3 - "$tmp/probe.json" "$expected" "$result" <<'PY'
@@ -108,7 +108,7 @@ for transport in http2 http3; do
     probe_ip "$transport" 10.20.0.1:9999 deny ipv4
     probe_ip "$transport" '[fd00:1234::1]:9999' deny ipv6
     # An independent UDP policy permits the same private target.
-    "$bin/masque-probe" 127.0.0.1:4433 --insecure --transport "$transport" \
+    "$bin/laz-masque-probe" 127.0.0.1:4433 --insecure --transport "$transport" \
         --skip-tcp --udp-target 10.20.0.1:9999 --udp-mode echo --timeout 2 --json >"$tmp/udp.json"
 done
 kill "$server_pid"

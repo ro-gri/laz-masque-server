@@ -12,18 +12,18 @@ file is the canonical deployable example and is tested by the release flow.
 ## CLI
 
 ```text
-masque-server [OPTIONS]
-masque-server hash-password
-masque-server client-config json --endpoint <HOST:PORT> --username <NAME> [OPTIONS]
-masque-server --config <PATH> check-config
-masque-server --config <PATH> doctor
-masque-server --config <PATH> support-bundle --out <PATH>
-masque-server --config <PATH> add-listener [OPTIONS]
-masque-server --config <PATH> list-users [OPTIONS]
-masque-server --config <PATH> add-user --username <NAME> [OPTIONS]
-masque-server --config <PATH> set-password --username <NAME> [OPTIONS]
-masque-server --config <PATH> remove-user --username <NAME> [OPTIONS]
-masque-server enroll-client [OPTIONS] --name <NAME> --endpoint <ADDR:PORT>
+laz-masque-server [OPTIONS]
+laz-masque-server hash-password
+laz-masque-server client-config json --endpoint <HOST:PORT> --username <NAME> [OPTIONS]
+laz-masque-server --config <PATH> check-config
+laz-masque-server --config <PATH> doctor
+laz-masque-server --config <PATH> support-bundle --out <PATH>
+laz-masque-server --config <PATH> add-listener [OPTIONS]
+laz-masque-server --config <PATH> list-users [OPTIONS]
+laz-masque-server --config <PATH> add-user --username <NAME> [OPTIONS]
+laz-masque-server --config <PATH> set-password --username <NAME> [OPTIONS]
+laz-masque-server --config <PATH> remove-user --username <NAME> [OPTIONS]
+laz-masque-server enroll-client [OPTIONS] --name <NAME> --endpoint <ADDR:PORT>
 
   -c, --config <PATH>       Config file [default: masque.toml]
       --cert <PATH>         Override tls.cert_path
@@ -177,7 +177,7 @@ openssl ech -ech_version 0xfe0d -public_name public.example.com -out ech.pem
 
 The server certificate needs DNS SANs for `server_name` (the client's inner SNI)
 and all configured ECH public names. The public name is the outer SNI for ECH.
-Run `masque-server --config /etc/masque/masque.toml check-config` to verify the
+Run `laz-masque-server --config /etc/masque/masque.toml check-config` to verify the
 keys and names before starting the service. Certificate renewals via `SIGHUP`
 also validate the names in use.
 
@@ -304,7 +304,7 @@ Generate the hash without placing the password in process arguments, which
 would expose it to every user on the host through the process list:
 
 ```sh
-printf '%s' 'a-strong-password' | masque-server hash-password
+printf '%s' 'a-strong-password' | laz-masque-server hash-password
 ```
 
 Clients send `Proxy-Authorization: Basic BASE64(user:password)` on each
@@ -343,17 +343,17 @@ management commands preserve comments, validate the complete result, hold the
 same advisory edit lock as `add-listener`, and replace the file atomically:
 
 ```sh
-printf '%s\n' 'phone-password' | sudo masque-server \
+printf '%s\n' 'phone-password' | sudo laz-masque-server \
   --config /etc/masque/masque.toml add-user \
   --username phone --password-stdin
 
-sudo masque-server --config /etc/masque/masque.toml list-users
+sudo laz-masque-server --config /etc/masque/masque.toml list-users
 
-printf '%s\n' 'replacement-password' | sudo masque-server \
+printf '%s\n' 'replacement-password' | sudo laz-masque-server \
   --config /etc/masque/masque.toml set-password \
   --username phone --password-stdin
 
-sudo masque-server --config /etc/masque/masque.toml remove-user \
+sudo laz-masque-server --config /etc/masque/masque.toml remove-user \
   --username phone
 sudo systemctl reload masque
 ```
@@ -376,7 +376,7 @@ When adding an account, the command can export the endpoint, transport,
 username, and password as JSON before discarding the plaintext password.
 
 ```sh
-printf '%s' 'phone-password' | sudo masque-server \
+printf '%s' 'phone-password' | sudo laz-masque-server \
   --config /etc/masque/masque.toml add-user \
   --username phone --password-stdin \
   --emit-client json --client-endpoint proxy.example.com:8449 \
@@ -393,7 +393,7 @@ password. If the plaintext is known, generate a client file without editing the
 account:
 
 ```sh
-printf '%s' 'phone-password' | masque-server client-config json \
+printf '%s' 'phone-password' | laz-masque-server client-config json \
   --endpoint proxy.example.com:8449 --username phone --transport http3 \
   --out /root/phone-basic.json
 ```
@@ -406,7 +406,7 @@ certificate may differ. Configure the peer's TLS server name and certificate
 verification according to its documentation, and retain certificate validation.
 The relay must forward UDP to the HTTP/3 listener.
 
-For diagnostics, `masque-probe` accepts `--resolve` to dial a selected address
+For diagnostics, `laz-masque-probe` accepts `--resolve` to dial a selected address
 while keeping the endpoint hostname for TLS verification. See
 [Troubleshooting](troubleshooting.md#fake-ip-dns-and-route-selection).
 
@@ -457,7 +457,7 @@ There is no enrollment API to call. The operator generates the key pair and
 distributes it:
 
 ```sh
-masque-server --config masque.toml enroll-client \
+laz-masque-server --config masque.toml enroll-client \
     --name laptop --endpoint 203.0.113.9:443 \
     --ipv4 10.89.0.2 --ipv6 fd00:abcd::2 --out client.json
 ```
@@ -582,13 +582,13 @@ concurrent password verification is sized from Basic listener workers alone,
 so adding a certificate listener does not widen what unauthenticated callers
 can demand.
 
-Run `masque-server --config masque.toml check-config` to validate a listener
+Run `laz-masque-server --config masque.toml check-config` to validate a listener
 file before restarting. It prints the resolved listeners, with the shard counts
 the server will actually run rather than the ones written down
 — `shards = 0` expanded to one per core, and any excess capped:
 
 ```
-configuration is compatible with masque-server 0.8.0: /etc/masque/masque.toml
+configuration is compatible with laz-masque-server 0.1.0: /etc/masque/masque.toml
 listener 0.0.0.0:443 transport=http3 auth=basic shards=1 max_datagram_size=1350
 listener 0.0.0.0:4443 transport=http2 auth=client_cert shards=1
 ```
@@ -631,7 +631,7 @@ own TUN interface.
 Edit the roster and/or replace both TLS files, then send `SIGHUP`:
 
 ```sh
-systemctl reload masque            # or: kill -HUP $(pidof masque-server)
+systemctl reload masque            # or: kill -HUP $(pidof laz-masque-server)
 ```
 
 The server always reloads the certificate chain, private key, and every active
@@ -685,7 +685,7 @@ file. Run without flags it prompts for everything, defaulting to a free port and
 to whichever authentication mode the file does not serve yet:
 
 ```sh
-masque-server --config /etc/masque/masque.toml add-listener
+laz-masque-server --config /etc/masque/masque.toml add-listener
 ```
 
 ```
@@ -707,7 +707,7 @@ is an error rather than a hang:
 
 ```sh
 printf '%s' 'replace-this-password' | \
-  masque-server --config /etc/masque/masque.toml add-listener \
+  laz-masque-server --config /etc/masque/masque.toml add-listener \
     --transport http2 --listen-addr 0.0.0.0:443 \
     --mode basic --password-stdin --username proxy-user --yes
 ```
@@ -1140,7 +1140,7 @@ authentication mode: client certificates alone do not require forwarding.
 After starting the service, run:
 
 ```sh
-sudo masque-server --config /etc/masque/masque.toml doctor
+sudo laz-masque-server --config /etc/masque/masque.toml doctor
 ```
 
 Startup reads only the hard `/dev/net/tun` and forwarding prerequisites and

@@ -23,14 +23,14 @@ CANDIDATE=${MASQUE_TEST_PACKAGE_BIN:-}
 CANDIDATE_PROBE=${MASQUE_TEST_PACKAGE_PROBE:-}
 [ -x "$CANDIDATE_PROBE" ] || die "MASQUE_TEST_PACKAGE_PROBE must name an executable"
 
-BIN_PATH=/usr/local/bin/masque-server
-PROBE_PATH=/usr/local/bin/masque-probe
-MAINTENANCE_PATH=/usr/local/sbin/masque-maintain
-LIBEXEC_DIR=/usr/local/libexec/masque-server
+BIN_PATH=/usr/local/bin/laz-masque-server
+PROBE_PATH=/usr/local/bin/laz-masque-probe
+MAINTENANCE_PATH=/usr/local/sbin/laz-masque-maintain
+LIBEXEC_DIR=/usr/local/libexec/laz-masque-server
 BOOTSTRAP_PATH=$LIBEXEC_DIR/install-latest.sh
 CONFIG_PATH=/etc/masque/masque.toml
-UNIT_PATH=/etc/systemd/system/masque.service
-MONITORING_DIR=/usr/local/share/masque-server/monitoring
+UNIT_PATH=/etc/systemd/system/laz-masque.service
+MONITORING_DIR=/usr/local/share/laz-masque-server/monitoring
 PROMETHEUS_RULES_PATH=$MONITORING_DIR/prometheus-rules.yml
 GRAFANA_DASHBOARD_PATH=$MONITORING_DIR/grafana-dashboard.json
 for protected_path in "$BIN_PATH" "$PROBE_PATH" "$MAINTENANCE_PATH" \
@@ -59,7 +59,7 @@ cleanup() {
         /etc/masque/certs/server.key
     rmdir /etc/masque/certs /etc/masque >/dev/null 2>&1
     rmdir "$LIBEXEC_DIR" /usr/local/libexec >/dev/null 2>&1
-    rmdir "$MONITORING_DIR" /usr/local/share/masque-server >/dev/null 2>&1
+    rmdir "$MONITORING_DIR" /usr/local/share/laz-masque-server >/dev/null 2>&1
     rm -rf -- "$TEST_TMP"
     exit "$cleanup_status"
 }
@@ -71,13 +71,13 @@ MOCK_BIN=$TEST_TMP/mock-bin
 MOCK_STATE=$TEST_TMP/restart-count
 install -d "$PACKAGE_DIR/bin" "$PACKAGE_DIR/config" "$PACKAGE_DIR/maintenance" \
     "$PACKAGE_DIR/monitoring" "$PACKAGE_DIR/systemd" "$MOCK_BIN"
-install -m 0755 "$CANDIDATE" "$PACKAGE_DIR/bin/masque-server"
-install -m 0755 "$CANDIDATE_PROBE" "$PACKAGE_DIR/bin/masque-probe"
+install -m 0755 "$CANDIDATE" "$PACKAGE_DIR/bin/laz-masque-server"
+install -m 0755 "$CANDIDATE_PROBE" "$PACKAGE_DIR/bin/laz-masque-probe"
 install -m 0755 deploy/install.sh "$PACKAGE_DIR/install.sh"
-install -m 0755 deploy/masque-maintain "$PACKAGE_DIR/maintenance/masque-maintain"
+install -m 0755 deploy/laz-masque-maintain "$PACKAGE_DIR/maintenance/laz-masque-maintain"
 install -m 0755 install-latest.sh "$PACKAGE_DIR/maintenance/install-latest.sh"
 install -m 0644 deploy/config/masque.toml "$PACKAGE_DIR/config/masque.toml"
-install -m 0644 deploy/systemd/masque.service "$PACKAGE_DIR/systemd/masque.service"
+install -m 0644 deploy/systemd/laz-masque.service "$PACKAGE_DIR/systemd/laz-masque.service"
 install -m 0644 deploy/monitoring/prometheus-rules.yml \
     "$PACKAGE_DIR/monitoring/prometheus-rules.yml"
 install -m 0644 deploy/monitoring/grafana-dashboard.json \
@@ -189,18 +189,22 @@ EOF
 }
 
 write_old_installation() {
-    cat >"$BIN_PATH" <<'EOF'
+    # Replace fixture executables instead of truncating an inode Linux may
+    # still hold open after a preceding invocation (ETXTBSY).
+    cat >"$TEST_TMP/old-server" <<'EOF'
 #!/usr/bin/env sh
-echo old-masque-server
+echo old-laz-masque-server
 EOF
-    chmod 0755 "$BIN_PATH"
-    cat >"$PROBE_PATH" <<'EOF'
+    chmod 0755 "$TEST_TMP/old-server"
+    mv -f -- "$TEST_TMP/old-server" "$BIN_PATH"
+    cat >"$TEST_TMP/old-probe" <<'EOF'
 #!/usr/bin/env sh
-echo old-masque-probe
+echo old-laz-masque-probe
 EOF
-    chmod 0755 "$PROBE_PATH"
+    chmod 0755 "$TEST_TMP/old-probe"
+    mv -f -- "$TEST_TMP/old-probe" "$PROBE_PATH"
     install -d /usr/local/sbin "$LIBEXEC_DIR"
-    printf '%s\n' '#!/bin/sh' 'echo old-masque-maintain' >"$MAINTENANCE_PATH"
+    printf '%s\n' '#!/bin/sh' 'echo old-laz-masque-maintain' >"$MAINTENANCE_PATH"
     printf '%s\n' '#!/bin/sh' 'echo old-install-latest' >"$BOOTSTRAP_PATH"
     chmod 0755 "$MAINTENANCE_PATH" "$BOOTSTRAP_PATH"
     printf '%s\n' 'old systemd unit' >"$UNIT_PATH"
@@ -446,7 +450,7 @@ assert_sha_unchanged /etc/masque/certs/server.key "$tls_key_sha"
 assert_upgrade_output_is_summary_only "$TEST_TMP/staged.log"
 candidate_sha=$(sha256sum "$CANDIDATE" | awk '{print $1}')
 candidate_probe_sha=$(sha256sum "$CANDIDATE_PROBE" | awk '{print $1}')
-candidate_maintenance_sha=$(sha256sum deploy/masque-maintain | awk '{print $1}')
+candidate_maintenance_sha=$(sha256sum deploy/laz-masque-maintain | awk '{print $1}')
 candidate_bootstrap_sha=$(sha256sum install-latest.sh | awk '{print $1}')
 assert_sha_unchanged "$BIN_PATH" "$candidate_sha"
 assert_sha_unchanged "$PROBE_PATH" "$candidate_probe_sha"
@@ -499,4 +503,21 @@ assert_sha_unchanged /etc/masque/certs/server.key "$tls_key_sha"
 grep -q 'Previous release-managed files and service state restored' \
     "$TEST_TMP/rollback.log" || die "rollback confirmation was not printed"
 
-echo "installer upgrade preflight, preservation, and rollback passed"
+# The restricted upgrade entrypoint must preserve build metadata for bootstrap.
+install -m 0755 deploy/laz-masque-maintain "$MAINTENANCE_PATH"
+cat >"$BOOTSTRAP_PATH" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$MASQUE_VERSION"
+EOF
+chmod 0755 "$BOOTSTRAP_PATH"
+metadata_version=v0.1.0+masque.0.15.0
+[ "$("$MAINTENANCE_PATH" upgrade "$metadata_version")" = "$metadata_version" ] ||
+    die "maintenance upgrade lost release metadata"
+for invalid in 'v0.1.0+' 'v0.1.0+masque..1' 'v0.1.0+a/b' 'v0.1.0+masque.0.15.0
+extra'; do
+    if "$MAINTENANCE_PATH" upgrade "$invalid" >"$TEST_TMP/invalid-version.log" 2>&1; then
+        die "maintenance accepted an invalid release version"
+    fi
+done
+
+echo "installer upgrade preflight, preservation, rollback, and metadata passed"

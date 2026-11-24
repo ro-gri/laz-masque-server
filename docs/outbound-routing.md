@@ -29,7 +29,7 @@ also set `ip_proxy.enabled = false` in the existing `[ip_proxy]` section:
 ```toml
 [outbound]
 default_route = "socks5"
-direct_cidrs_file = "/etc/masque-server/ru-cidrs.txt"
+direct_cidrs_file = "/etc/laz-masque-server/ru-cidrs.txt"
 # Optional additional DIRECT ranges. These do not grant target access.
 direct_cidrs = []
 
@@ -40,7 +40,7 @@ max_udp_associations = 1024
 udp_max_packet_size = 65507 # Generic complete SOCKS5 UDP packet budget
 # Optional RFC 1929 authentication; specify both fields together.
 # username = "masque"
-# password_file = "/etc/masque-server/socks5-password"
+# password_file = "/etc/laz-masque-server/socks5-password"
 ```
 
 The upstream must be a concrete loopback IP with a nonzero port. The password
@@ -66,7 +66,7 @@ file path require a restart. Only the contents of the startup CIDR file can
 be updated without restarting:
 
 ```sh
-masque-server --status-socket /run/masque/status.sock reload-direct-cidrs
+laz-masque-server --status-socket /run/masque/status.sock reload-direct-cidrs
 ```
 
 The default socket path is `/run/masque/status.sock`; omit the option when using

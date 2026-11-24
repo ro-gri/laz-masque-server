@@ -179,7 +179,7 @@ floods wrong passwords, half-open TLS sockets, excess streams, and DATAGRAM
 capsules. It checks authentication and tunnel high-water marks, CPU ticks,
 resident-memory growth, and `/proc/<pid>/fd` against the configured ceilings.
 
-`masque-server support-bundle` is deliberately a metadata-only diagnostic. It
+`laz-masque-server support-bundle` is deliberately a metadata-only diagnostic. It
 does not copy the configuration, logs, environment, usernames, password hashes,
 client labels or keys, certificate identities, target addresses, or traffic
 data. The generated file is created as mode `0600` and never overwrites an
@@ -275,7 +275,7 @@ the deployment does not need.
 Keep host forwarding and NAT rules narrow to the configured TUN interface and
 address pools. The proxy does not manage the host firewall.
 
-`masque-server doctor` only reads sysctls, interface and route state, and
+`laz-masque-server doctor` only reads sysctls, interface and route state, and
 available firewall rules. The daemon's smaller startup check reads only
 `/dev/net/tun` and forwarding sysctls; it does not execute firewall utilities.
 Neither check enables forwarding or writes routing, firewall, or NAT

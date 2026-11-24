@@ -180,7 +180,7 @@ fn check_config_validates_without_binding_the_listen_port() {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+    let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
         .arg("--config")
         .arg(&config_path)
         .arg("check-config")
@@ -233,7 +233,7 @@ fn check_config_handles_ipv6_pool_prefix_boundaries() {
                     ),
                 )
                 .unwrap();
-                let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+                let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
                     .arg("--config")
                     .arg(&config_path)
                     .arg("check-config")
@@ -288,7 +288,7 @@ fn global_target_policies_reject_invalid_cidrs_before_check_or_startup() {
                         )
                         .unwrap();
                         for check_only in [true, false] {
-                            let mut command = Command::new(env!("CARGO_BIN_EXE_masque-server"));
+                            let mut command = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"));
                             command.arg("--config").arg(&config_path);
                             if check_only {
                                 command.arg("check-config");
@@ -346,7 +346,7 @@ fn global_target_policies_accept_valid_and_empty_cidr_lists() {
                 ),
             )
             .unwrap();
-            let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+            let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
                 .arg("--config")
                 .arg(&config_path)
                 .arg("check-config")
@@ -395,7 +395,7 @@ fn quic_socket_buffer_requests_are_bounded_and_do_not_bind() {
                 base.replace("[quic]", &format!("[quic]\n{field} = {size}")),
             )
             .unwrap();
-            let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+            let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
                 .arg("--config")
                 .arg(&config_path)
                 .arg("check-config")
@@ -431,7 +431,7 @@ fn doctor_is_read_only_and_succeeds_when_connect_ip_is_disabled() {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+    let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
         .arg("--config")
         .arg(&config_path)
         .arg("doctor")
@@ -478,7 +478,7 @@ public_key = "PRIVATE-PUBLIC-KEY""#
     let bundle_path = dir.path().join("support.json");
     std::fs::write(&config_path, config).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+    let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
         .arg("--config")
         .arg(&config_path)
         .arg("support-bundle")
@@ -535,7 +535,7 @@ fn json_log_format_emits_machine_parseable_events() {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+    let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
         .arg("--log-format")
         .arg("json")
         .arg("--config")
@@ -580,7 +580,7 @@ fn check_config_keeps_an_ephemeral_port_unresolved() {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+    let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
         .arg("--config")
         .arg(&config_path)
         .arg("check-config")
@@ -613,7 +613,7 @@ fn check_config_reports_a_loopback_observability_endpoint() {
     config.push_str("\n[observability]\nlisten_addr = \"127.0.0.1:9090\"\n");
     std::fs::write(&config_path, config).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+    let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
         .arg("--config")
         .arg(&config_path)
         .arg("check-config")
@@ -647,7 +647,7 @@ fn check_config_rejects_a_public_observability_endpoint() {
     config.push_str("\n[observability]\nlisten_addr = \"0.0.0.0:9090\"\n");
     std::fs::write(&config_path, config).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+    let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
         .arg("--config")
         .arg(&config_path)
         .arg("check-config")
@@ -723,7 +723,7 @@ fn check_config_accepts_two_listeners_with_different_authentication_modes() {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+    let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
         .arg("--config")
         .arg(&config_path)
         .arg("check-config")
@@ -751,7 +751,7 @@ fn check_config_rejects_two_listeners_on_the_same_address() {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+    let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
         .arg("--config")
         .arg(&config_path)
         .arg("check-config")
@@ -794,7 +794,7 @@ enabled = false
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+    let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
         .arg("--config")
         .arg(&config_path)
         .arg("check-config")
@@ -840,7 +840,7 @@ enabled = false
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+    let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
         .arg("--config")
         .arg(&config_path)
         .arg("check-config")
@@ -881,7 +881,7 @@ fn check_config_rejects_an_unknown_congestion_controller() {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+    let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
         .arg("--config")
         .arg(&config_path)
         .arg("check-config")
@@ -907,7 +907,7 @@ fn status_reports_valid_and_invalid_disk_configuration() {
     )
     .unwrap();
     let run = || {
-        Command::new(env!("CARGO_BIN_EXE_masque-server"))
+        Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
             .arg("--config")
             .arg(&config)
             .arg("status")
@@ -1021,7 +1021,7 @@ fn check_config_validates_standard_ip_uri_templates_without_affecting_legacy_onl
     ] {
         let text = base.replace("[ip_proxy]\nenabled = false", &format!("[ip_proxy]\nenabled = true\nconnect_protocols = {protocols}\nuri_template = {template:?}"));
         std::fs::write(&path, text).unwrap();
-        let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+        let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
             .arg("--config")
             .arg(&path)
             .arg("check-config")
@@ -1088,7 +1088,7 @@ fn status_compares_running_config_and_successful_reload_without_exposing_values(
     write_config(&cfg);
     let spawn = || {
         Process(
-            Command::new(env!("CARGO_BIN_EXE_masque-server"))
+            Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
                 .args([
                     "--config",
                     path.to_str().unwrap(),
@@ -1103,7 +1103,7 @@ fn status_compares_running_config_and_successful_reload_without_exposing_values(
     };
     let process = spawn();
     let status = || {
-        let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+        let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
             .args([
                 "--config",
                 path.to_str().unwrap(),
@@ -1170,7 +1170,7 @@ fn status_compares_running_config_and_successful_reload_without_exposing_values(
         "tls_identity: reload required",
     ]);
     let reload_direct = || {
-        Command::new(env!("CARGO_BIN_EXE_masque-server"))
+        Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
             .args([
                 "--status-socket",
                 socket.to_str().unwrap(),

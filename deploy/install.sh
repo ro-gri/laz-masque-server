@@ -7,20 +7,20 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 PACKAGE_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-CANDIDATE_BIN=$PACKAGE_DIR/bin/masque-server
-CANDIDATE_PROBE=$PACKAGE_DIR/bin/masque-probe
-CANDIDATE_MAINTENANCE=$PACKAGE_DIR/maintenance/masque-maintain
+CANDIDATE_BIN=$PACKAGE_DIR/bin/laz-masque-server
+CANDIDATE_PROBE=$PACKAGE_DIR/bin/laz-masque-probe
+CANDIDATE_MAINTENANCE=$PACKAGE_DIR/maintenance/laz-masque-maintain
 CANDIDATE_BOOTSTRAP=$PACKAGE_DIR/maintenance/install-latest.sh
-BIN_PATH=/usr/local/bin/masque-server
-PROBE_PATH=/usr/local/bin/masque-probe
-MAINTENANCE_PATH=/usr/local/sbin/masque-maintain
-LIBEXEC_DIR=/usr/local/libexec/masque-server
+BIN_PATH=/usr/local/bin/laz-masque-server
+PROBE_PATH=/usr/local/bin/laz-masque-probe
+MAINTENANCE_PATH=/usr/local/sbin/laz-masque-maintain
+LIBEXEC_DIR=/usr/local/libexec/laz-masque-server
 BOOTSTRAP_PATH=$LIBEXEC_DIR/install-latest.sh
 CONFIG_PATH=/etc/masque/masque.toml
 TLS_CERT_PATH=/etc/masque/certs/server.crt
 TLS_KEY_PATH=/etc/masque/certs/server.key
-UNIT_PATH=/etc/systemd/system/masque.service
-MONITORING_DIR=/usr/local/share/masque-server/monitoring
+UNIT_PATH=/etc/systemd/system/laz-masque.service
+MONITORING_DIR=/usr/local/share/laz-masque-server/monitoring
 PROMETHEUS_RULES_PATH=$MONITORING_DIR/prometheus-rules.yml
 GRAFANA_DASHBOARD_PATH=$MONITORING_DIR/grafana-dashboard.json
 
@@ -102,7 +102,7 @@ rollback_installation() {
     rollback_ok=1
 
     if [ "$HAD_BINARY" -eq 1 ]; then
-        if ! cp -p -- "$UPGRADE_BACKUP_DIR/masque-server" "$BIN_PATH"; then
+        if ! cp -p -- "$UPGRADE_BACKUP_DIR/laz-masque-server" "$BIN_PATH"; then
             echo "error: could not restore $BIN_PATH" >&2
             rollback_ok=0
         fi
@@ -112,7 +112,7 @@ rollback_installation() {
     fi
 
     if [ "$HAD_PROBE" -eq 1 ]; then
-        if ! cp -p -- "$UPGRADE_BACKUP_DIR/masque-probe" "$PROBE_PATH"; then
+        if ! cp -p -- "$UPGRADE_BACKUP_DIR/laz-masque-probe" "$PROBE_PATH"; then
             echo "error: could not restore $PROBE_PATH" >&2
             rollback_ok=0
         fi
@@ -122,7 +122,7 @@ rollback_installation() {
     fi
 
     if [ "$HAD_MAINTENANCE" -eq 1 ]; then
-        if ! cp -p -- "$UPGRADE_BACKUP_DIR/masque-maintain" "$MAINTENANCE_PATH"; then
+        if ! cp -p -- "$UPGRADE_BACKUP_DIR/laz-masque-maintain" "$MAINTENANCE_PATH"; then
             echo "error: could not restore $MAINTENANCE_PATH" >&2
             rollback_ok=0
         fi
@@ -142,7 +142,7 @@ rollback_installation() {
     fi
 
     if [ "$HAD_UNIT" -eq 1 ]; then
-        if ! cp -p -- "$UPGRADE_BACKUP_DIR/masque.service" "$UNIT_PATH"; then
+        if ! cp -p -- "$UPGRADE_BACKUP_DIR/laz-masque.service" "$UNIT_PATH"; then
             echo "error: could not restore $UNIT_PATH" >&2
             rollback_ok=0
         fi
@@ -178,21 +178,21 @@ rollback_installation() {
         rollback_ok=0
     fi
     if [ "$WAS_SERVICE_ENABLED" -eq 1 ]; then
-        if ! systemctl enable masque.service >/dev/null; then
+        if ! systemctl enable laz-masque.service >/dev/null; then
             echo "error: could not restore the enabled service state" >&2
             rollback_ok=0
         fi
-    elif ! systemctl disable masque.service >/dev/null 2>&1; then
+    elif ! systemctl disable laz-masque.service >/dev/null 2>&1; then
         # A never-installed unit has nothing to disable.
         :
     fi
 
     if [ "$WAS_SERVICE_ACTIVE" -eq 1 ]; then
-        if ! systemctl restart masque.service; then
+        if ! systemctl restart laz-masque.service; then
             echo "error: the previous binary was restored but its service did not restart" >&2
             rollback_ok=0
         fi
-    elif ! systemctl stop masque.service >/dev/null 2>&1; then
+    elif ! systemctl stop laz-masque.service >/dev/null 2>&1; then
         :
     fi
 
@@ -741,15 +741,15 @@ snapshot_installed_files() {
     chmod 0700 "$UPGRADE_BACKUP_DIR"
 
     if [ -e "$BIN_PATH" ]; then
-        cp -p -- "$BIN_PATH" "$UPGRADE_BACKUP_DIR/masque-server"
+        cp -p -- "$BIN_PATH" "$UPGRADE_BACKUP_DIR/laz-masque-server"
         HAD_BINARY=1
     fi
     if [ -e "$PROBE_PATH" ]; then
-        cp -p -- "$PROBE_PATH" "$UPGRADE_BACKUP_DIR/masque-probe"
+        cp -p -- "$PROBE_PATH" "$UPGRADE_BACKUP_DIR/laz-masque-probe"
         HAD_PROBE=1
     fi
     if [ -e "$MAINTENANCE_PATH" ]; then
-        cp -p -- "$MAINTENANCE_PATH" "$UPGRADE_BACKUP_DIR/masque-maintain"
+        cp -p -- "$MAINTENANCE_PATH" "$UPGRADE_BACKUP_DIR/laz-masque-maintain"
         HAD_MAINTENANCE=1
     fi
     if [ -e "$BOOTSTRAP_PATH" ]; then
@@ -757,7 +757,7 @@ snapshot_installed_files() {
         HAD_BOOTSTRAP=1
     fi
     if [ -e "$UNIT_PATH" ]; then
-        cp -p -- "$UNIT_PATH" "$UPGRADE_BACKUP_DIR/masque.service"
+        cp -p -- "$UNIT_PATH" "$UPGRADE_BACKUP_DIR/laz-masque.service"
         HAD_UNIT=1
     fi
     if [ -e "$PROMETHEUS_RULES_PATH" ]; then
@@ -768,27 +768,27 @@ snapshot_installed_files() {
         cp -p -- "$GRAFANA_DASHBOARD_PATH" "$UPGRADE_BACKUP_DIR/grafana-dashboard.json"
         HAD_GRAFANA_DASHBOARD=1
     fi
-    if systemctl is-active --quiet masque.service; then
+    if systemctl is-active --quiet laz-masque.service; then
         WAS_SERVICE_ACTIVE=1
     fi
-    if systemctl is-enabled --quiet masque.service; then
+    if systemctl is-enabled --quiet laz-masque.service; then
         WAS_SERVICE_ENABLED=1
     fi
 }
 
 install_program_and_unit() {
-    BINARY_INSTALL_TMP=$(mktemp /usr/local/bin/.masque-server.install.XXXXXX)
-    PROBE_INSTALL_TMP=$(mktemp /usr/local/bin/.masque-probe.install.XXXXXX)
-    MAINTENANCE_INSTALL_TMP=$(mktemp /usr/local/sbin/.masque-maintain.install.XXXXXX)
+    BINARY_INSTALL_TMP=$(mktemp /usr/local/bin/.laz-masque-server.install.XXXXXX)
+    PROBE_INSTALL_TMP=$(mktemp /usr/local/bin/.laz-masque-probe.install.XXXXXX)
+    MAINTENANCE_INSTALL_TMP=$(mktemp /usr/local/sbin/.laz-masque-maintain.install.XXXXXX)
     BOOTSTRAP_INSTALL_TMP=$(mktemp "$LIBEXEC_DIR/.install-latest.install.XXXXXX")
-    UNIT_INSTALL_TMP=$(mktemp /etc/systemd/system/.masque.service.install.XXXXXX)
+    UNIT_INSTALL_TMP=$(mktemp /etc/systemd/system/.laz-masque.service.install.XXXXXX)
     PROMETHEUS_RULES_INSTALL_TMP=$(mktemp "$MONITORING_DIR/.prometheus-rules.install.XXXXXX")
     GRAFANA_DASHBOARD_INSTALL_TMP=$(mktemp "$MONITORING_DIR/.grafana-dashboard.install.XXXXXX")
     install -m 0755 "$CANDIDATE_BIN" "$BINARY_INSTALL_TMP"
     install -m 0755 "$CANDIDATE_PROBE" "$PROBE_INSTALL_TMP"
     install -m 0755 "$CANDIDATE_MAINTENANCE" "$MAINTENANCE_INSTALL_TMP"
     install -m 0755 "$CANDIDATE_BOOTSTRAP" "$BOOTSTRAP_INSTALL_TMP"
-    install -m 0644 "$PACKAGE_DIR/systemd/masque.service" "$UNIT_INSTALL_TMP"
+    install -m 0644 "$PACKAGE_DIR/systemd/laz-masque.service" "$UNIT_INSTALL_TMP"
     install -m 0644 "$PACKAGE_DIR/monitoring/prometheus-rules.yml" \
         "$PROMETHEUS_RULES_INSTALL_TMP"
     install -m 0644 "$PACKAGE_DIR/monitoring/grafana-dashboard.json" \
@@ -813,12 +813,12 @@ install_program_and_unit() {
     GRAFANA_DASHBOARD_INSTALL_TMP=
 
     systemctl daemon-reload
-    systemctl enable masque.service
+    systemctl enable laz-masque.service
 
     if [ "$START_REQUESTED" -eq 1 ]; then
         if [ "$FRESH_CONFIG" -eq 0 ] ||
             { [ -r "$TLS_CERT_PATH" ] && [ -r "$TLS_KEY_PATH" ]; }; then
-            systemctl restart masque.service
+            systemctl restart laz-masque.service
             SERVICE_RESULT="started or restarted"
         else
             SERVICE_RESULT="enabled, not started (TLS certificate or key is missing)"
@@ -844,7 +844,7 @@ run_host_diagnostics() {
     if "$BIN_PATH" --config "$CONFIG_PATH" doctor; then
         HOST_DIAGNOSTICS_RESULT="passed"
     else
-        HOST_DIAGNOSTICS_RESULT="attention required; run masque-server --config $CONFIG_PATH doctor"
+        HOST_DIAGNOSTICS_RESULT="attention required; run laz-masque-server --config $CONFIG_PATH doctor"
         echo "warning: CONNECT-IP host diagnostics found missing or unverified prerequisites." >&2
         echo "warning: installation continues; no forwarding, firewall, routing, or NAT setting was changed." >&2
     fi
@@ -958,7 +958,7 @@ if ! id masque >/dev/null 2>&1; then
 fi
 
 install -d -m 0755 /usr/local/bin /usr/local/sbin "$LIBEXEC_DIR" \
-    /etc/masque /etc/systemd/system /usr/local/share/masque-server \
+    /etc/masque /etc/systemd/system /usr/local/share/laz-masque-server \
     "$MONITORING_DIR"
 install -d -o root -g masque -m 0750 /etc/masque/certs
 
@@ -1063,13 +1063,13 @@ elif [ "$START_REQUESTED" -eq 0 ]; then
     echo "Start the service with: systemctl start masque"
 fi
 echo "Review $CONFIG_PATH, especially the proxy allow/deny policy."
-echo "Diagnose from a client host with: masque-probe <host:port> --username <user> --password-stdin"
-echo "Create a support report with: masque-server --config $CONFIG_PATH support-bundle --out masque-support.json"
+echo "Diagnose from a client host with: laz-masque-probe <host:port> --username <user> --password-stdin"
+echo "Create a support report with: laz-masque-server --config $CONFIG_PATH support-bundle --out masque-support.json"
 
 # Listeners are written only for a fresh installation; an upgrade keeps the
 # existing file. Adding one later is a separate, deliberate command, so name it
 # here rather than leaving hand-edited TOML as the discoverable option.
 echo
 echo "To serve another authentication mode, or another port, add a listener:"
-echo "  masque-server --config $CONFIG_PATH add-listener"
+echo "  laz-masque-server --config $CONFIG_PATH add-listener"
 echo "Then open its UDP (http3) or TCP (http2) port and run: systemctl restart masque"

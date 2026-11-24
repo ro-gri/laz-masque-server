@@ -26,14 +26,14 @@ PROBE_VERSION=$(awk '
     /^\[package\]$/ { in_package=1; next }
     /^\[/ { in_package=0 }
     in_package && /^version = / { gsub(/[" ]/, "", $3); print $3; exit }
-' tools/masque-probe/Cargo.toml)
+' tools/laz-masque-probe/Cargo.toml)
 if [ -z "$PACKAGE_VERSION" ] || [ "$PACKAGE_VERSION" != "$PROBE_VERSION" ]; then
-    echo "error: masque-server and masque-probe package versions must match" >&2
+    echo "error: laz-masque-server and laz-masque-probe package versions must match" >&2
     exit 1
 fi
 VERSION="${VERSION:-$PACKAGE_VERSION}"
 OUTPUT_DIR="${OUTPUT_DIR:-dist}"
-ARCHIVE_NAME="masque-v${VERSION}-linux-${ARCH}"
+ARCHIVE_NAME="laz-masque-server-v${VERSION}-linux-${ARCH}"
 STAGING_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/masque-package.XXXXXX")"
 
 cleanup() {
@@ -43,10 +43,10 @@ trap cleanup EXIT INT TERM
 
 if [ "${USE_ZIGBUILD:-0}" = "1" ]; then
     cargo zigbuild --locked --release --target "$TARGET" \
-        -p masque-server -p masque-probe
+        -p laz-masque-server -p laz-masque-probe
 else
     cargo build --locked --release --target "$TARGET" \
-        -p masque-server -p masque-probe
+        -p laz-masque-server -p laz-masque-probe
 fi
 
 install -d \
@@ -55,23 +55,24 @@ install -d \
     "$STAGING_ROOT/$ARCHIVE_NAME/maintenance" \
     "$STAGING_ROOT/$ARCHIVE_NAME/monitoring" \
     "$STAGING_ROOT/$ARCHIVE_NAME/systemd"
-install -m 0755 "target/$TARGET/release/masque-server" \
-    "$STAGING_ROOT/$ARCHIVE_NAME/bin/masque-server"
-install -m 0755 "target/$TARGET/release/masque-probe" \
-    "$STAGING_ROOT/$ARCHIVE_NAME/bin/masque-probe"
+install -m 0755 "target/$TARGET/release/laz-masque-server" \
+    "$STAGING_ROOT/$ARCHIVE_NAME/bin/laz-masque-server"
+install -m 0755 "target/$TARGET/release/laz-masque-probe" \
+    "$STAGING_ROOT/$ARCHIVE_NAME/bin/laz-masque-probe"
 install -m 0755 deploy/install.sh "$STAGING_ROOT/$ARCHIVE_NAME/install.sh"
-install -m 0755 deploy/masque-maintain \
-    "$STAGING_ROOT/$ARCHIVE_NAME/maintenance/masque-maintain"
+install -m 0755 deploy/laz-masque-maintain \
+    "$STAGING_ROOT/$ARCHIVE_NAME/maintenance/laz-masque-maintain"
 install -m 0755 install-latest.sh \
     "$STAGING_ROOT/$ARCHIVE_NAME/maintenance/install-latest.sh"
 install -m 0644 deploy/config/masque.toml "$STAGING_ROOT/$ARCHIVE_NAME/config/masque.toml"
-install -m 0644 deploy/systemd/masque.service \
-    "$STAGING_ROOT/$ARCHIVE_NAME/systemd/masque.service"
+install -m 0644 deploy/systemd/laz-masque.service \
+    "$STAGING_ROOT/$ARCHIVE_NAME/systemd/laz-masque.service"
 install -m 0644 deploy/monitoring/prometheus-rules.yml \
     "$STAGING_ROOT/$ARCHIVE_NAME/monitoring/prometheus-rules.yml"
 install -m 0644 deploy/monitoring/grafana-dashboard.json \
     "$STAGING_ROOT/$ARCHIVE_NAME/monitoring/grafana-dashboard.json"
 install -m 0644 README.md "$STAGING_ROOT/$ARCHIVE_NAME/README.md"
+install -m 0644 README.ru.md "$STAGING_ROOT/$ARCHIVE_NAME/README.ru.md"
 install -m 0644 CHANGELOG.md "$STAGING_ROOT/$ARCHIVE_NAME/CHANGELOG.md"
 install -m 0644 LICENSE "$STAGING_ROOT/$ARCHIVE_NAME/LICENSE"
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-REPOSITORY=${MASQUE_GITHUB_REPOSITORY:-zenith-ent/masque-server}
+REPOSITORY=${MASQUE_GITHUB_REPOSITORY:-ro-gri/laz-masque-server}
 DOWNLOAD_DIR=
 
 die() {
@@ -57,16 +57,17 @@ else
     esac
 fi
 
+# GitHub may percent-encode '+' in the latest-release redirect.
+RELEASE_TAG=$(printf '%s' "$RELEASE_TAG" | sed 's/%2[Bb]/+/g')
 case "$RELEASE_TAG" in
-    v[0-9A-Za-z]*) ;;
-    *) die "invalid release tag: $RELEASE_TAG" ;;
+    *[!0-9A-Za-z.+-]*) die "invalid release tag: $RELEASE_TAG" ;;
 esac
-case "$RELEASE_TAG" in
-    *[!0-9A-Za-z._-]*) die "invalid release tag: $RELEASE_TAG" ;;
-esac
+if ! printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+    die "invalid release tag: $RELEASE_TAG"
+fi
 
 VERSION=${RELEASE_TAG#v}
-ARCHIVE_NAME=masque-v${VERSION}-linux-${ARCH}.tar.gz
+ARCHIVE_NAME=laz-masque-server-v${VERSION}-linux-${ARCH}.tar.gz
 CHECKSUM_NAME=$ARCHIVE_NAME.sha256
 DOWNLOAD_BASE=https://github.com/$REPOSITORY/releases/download/$RELEASE_TAG
 
@@ -75,7 +76,7 @@ chmod 0700 "$DOWNLOAD_DIR"
 ARCHIVE_PATH=$DOWNLOAD_DIR/$ARCHIVE_NAME
 CHECKSUM_PATH=$DOWNLOAD_DIR/$CHECKSUM_NAME
 
-echo "Downloading MASQUE Server $RELEASE_TAG ..."
+echo "Downloading Laz MASQUE Server $RELEASE_TAG ..."
 curl -fL --retry 3 -o "$ARCHIVE_PATH" "$DOWNLOAD_BASE/$ARCHIVE_NAME"
 curl -fL --retry 3 -o "$CHECKSUM_PATH" "$DOWNLOAD_BASE/$CHECKSUM_NAME"
 
@@ -94,7 +95,7 @@ if tar tzf "$ARCHIVE_PATH" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
 fi
 tar xzf "$ARCHIVE_PATH" -C "$DOWNLOAD_DIR"
 
-PACKAGE_DIR=$DOWNLOAD_DIR/masque-v${VERSION}-linux-${ARCH}
+PACKAGE_DIR=$DOWNLOAD_DIR/laz-masque-server-v${VERSION}-linux-${ARCH}
 if [ ! -x "$PACKAGE_DIR/install.sh" ]; then
     die "the release archive does not contain an executable install.sh"
 fi

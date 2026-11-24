@@ -1,5 +1,8 @@
 # HTTP/3 multi-tunnel UDP scheduling investigation
 
+Historical measurements and release versions below refer to upstream MASQUE
+Server before this fork; they are not measurements of Laz MASQUE Server 0.1.0.
+
 ## Decision
 
 Keep production UDP scheduling unchanged. The per-datagram linear

@@ -1,6 +1,6 @@
 ---
-name: masque-ops
-description: Safely bootstrap, inspect, diagnose, deploy, roll out, and roll back a masque-server fleet through the bundled deterministic operations CLI. Use when an operator asks Codex to install an empty MASQUE host, check fleet health, execute a release upgrade, collect bounded diagnostics, or recover a prior version. Do not use for ordinary source-code changes, release creation, or editing remote network and authentication configuration.
+name: laz-masque-ops
+description: Safely bootstrap, inspect, diagnose, deploy, roll out, and roll back a laz-masque-server fleet through the bundled deterministic operations CLI. Use when an operator asks Codex to install an empty MASQUE host, check fleet health, execute a release upgrade, collect bounded diagnostics, or recover a prior version. Do not use for ordinary source-code changes, release creation, or editing remote network and authentication configuration.
 ---
 
 # MASQUE operations
@@ -12,10 +12,10 @@ was installed globally.
 
 ## Workflow
 
-1. Resolve `scripts/masque-ops.py` inside this Skill directory and use that exact
+1. Resolve `scripts/laz-masque-ops.py` inside this Skill directory and use that exact
    executable for every command. Do not search for another checkout or CLI.
    Use the private inventory path supplied by the operator or the default
-   `~/.config/masque-server/fleet.toml`. Never open or print that file; pass its
+   `~/.config/laz-masque-server/fleet.toml`. Never open or print that file; pass its
    path only to the bundled CLI, which owns parsing and secret handling.
 2. Read [references/inventory.md](references/inventory.md) when creating or
    validating inventory, SSH, probes, or sudo access. For a first empty host,
@@ -62,8 +62,8 @@ was installed globally.
    on/off testing over the real external path; kernel support and a passing
    connectivity probe do not establish performance or absence of packet loss.
    Target UDP GSO is a separate setting and needs its own CONNECT-UDP test.
-   Refer to the [performance guide](https://github.com/zenith-ent/masque-server/blob/main/docs/performance.md#quic-socket)
-   and [configuration guide](https://github.com/zenith-ent/masque-server/blob/main/docs/configuration.md#quic-and-udp).
+   Refer to the [performance guide](https://github.com/ro-gri/laz-masque-server/blob/main/docs/performance.md#quic-socket)
+   and [configuration guide](https://github.com/ro-gri/laz-masque-server/blob/main/docs/configuration.md#quic-and-udp).
    This is advice, not authorization or a supported remote configuration
    operation; do not change settings during a release rollout.
 
@@ -89,7 +89,7 @@ Changing an existing fleet configuration is outside this CLI's capabilities.
 - Do not edit remote configuration, TLS files, routes, forwarding, firewall,
   NAT, systemd policy, or sudoers as part of a release rollout.
 - Use `--bootstrap` only for the one-time migration from a release that lacks
-  `masque-maintain`, and only after explicit authorization for root SSH.
+  `laz-masque-maintain`, and only after explicit authorization for root SSH.
 - Use the `bootstrap` subcommand only for an unconfigured Linux host with the
   private `[hosts.bootstrap]` profile, and only after explicit authorization.
   It transmits credentials through SSH standard input and never reports them.

@@ -2,7 +2,7 @@
 
 ## Goals
 
-MASQUE Server is a single-process HTTP/2 and HTTP/3 proxy optimized for bounded
+Laz MASQUE Server is a single-process HTTP/2 and HTTP/3 proxy optimized for bounded
 resource use and high UDP throughput. HTTP/3 is the performance path; HTTP/2
 is a compatibility path for TCP-only networks. Its core rules are:
 
@@ -19,7 +19,7 @@ is a compatibility path for TCP-only networks. Its core rules are:
 flowchart LR
     Client["MASQUE client"]
 
-    subgraph Server["MASQUE Server · single process"]
+    subgraph Server["Laz MASQUE Server · single process"]
         direction TB
         subgraph Transport["Transport and connections"]
             H3["HTTP/3<br/>QUIC / UDP<br/>shard event loops"]

@@ -799,7 +799,7 @@ fn fixture_with_retry_and_shards(tag: &str, retry_mode: QuicRetryMode, shards: u
         dir.path(),
         "server",
         &server_key,
-        &self_signed(&server_key, Some("masque-server")),
+        &self_signed(&server_key, Some("laz-masque-server")),
     );
 
     let client_key = p256_key();
@@ -881,7 +881,7 @@ fn dual_fixture_with_stealth(tag: &str, stealth: bool) -> DualFixture {
         dir.path(),
         "server",
         &server_key,
-        &self_signed(&server_key, Some("masque-server")),
+        &self_signed(&server_key, Some("laz-masque-server")),
     );
 
     let client_key = p256_key();
@@ -1129,7 +1129,7 @@ fn ephemeral_multi_shard_listeners_share_only_their_own_port() {
         dir.path(),
         "server",
         &server_key,
-        &self_signed(&server_key, Some("masque-server")),
+        &self_signed(&server_key, Some("laz-masque-server")),
     );
 
     let mut config = ServerConfig::default();
@@ -1198,7 +1198,7 @@ fn revoked_client_is_disconnected_on_reload_while_others_keep_running() {
         dir.path(),
         "server",
         &server_key,
-        &self_signed(&server_key, Some("masque-server")),
+        &self_signed(&server_key, Some("laz-masque-server")),
     );
 
     let doomed_key = p256_key();
@@ -1293,7 +1293,7 @@ fn a_broken_reload_keeps_the_previous_roster() {
         dir.path(),
         "server",
         &server_key,
-        &self_signed(&server_key, Some("masque-server")),
+        &self_signed(&server_key, Some("laz-masque-server")),
     );
     let client_key = p256_key();
     let (client_cert, client_key_path) = write_pem(
@@ -1360,7 +1360,7 @@ fn http3_tls_identity_reloads_without_dropping_existing_connections() {
     let dir = TempDir::new("tls-reload-h3");
 
     let original_key = p256_key();
-    let original_cert = self_signed(&original_key, Some("masque-server-original"));
+    let original_cert = self_signed(&original_key, Some("laz-masque-server-original"));
     let (cert_path, key_path) = write_pem(dir.path(), "server", &original_key, &original_cert);
     let client_key = p256_key();
     let (client_cert, client_key_path) = write_pem(
@@ -1389,7 +1389,7 @@ fn http3_tls_identity_reloads_without_dropping_existing_connections() {
     established.init_h3().unwrap();
 
     let replacement_key = p256_key();
-    let replacement_cert = self_signed(&replacement_key, Some("masque-server-replacement"));
+    let replacement_cert = self_signed(&replacement_key, Some("laz-masque-server-replacement"));
     std::fs::write(&cert_path, replacement_cert.to_pem().unwrap()).unwrap();
     std::fs::write(
         &key_path,
@@ -1599,7 +1599,7 @@ fn blocked_responses_resume_after_connection_credit_is_replenished() {
         dir.path(),
         "server",
         &key,
-        &self_signed(&key, Some("masque-server")),
+        &self_signed(&key, Some("laz-masque-server")),
     );
     let bulk_target = std::net::TcpListener::bind(ephemeral_addr()).unwrap();
     let bulk_address = bulk_target.local_addr().unwrap();
@@ -1756,7 +1756,7 @@ fn blocked_tcp_connect_response_keeps_target_until_client_reset() {
         dir.path(),
         "server",
         &key,
-        &self_signed(&key, Some("masque-server")),
+        &self_signed(&key, Some("laz-masque-server")),
     );
     let target = std::net::TcpListener::bind(ephemeral_addr()).unwrap();
     target.set_nonblocking(true).unwrap();
@@ -1858,7 +1858,7 @@ fn local_target_aliases_cannot_bypass_tcp_or_udp_policy_over_http3() {
         dir.path(),
         "server",
         &key,
-        &self_signed(&key, Some("masque-server")),
+        &self_signed(&key, Some("laz-masque-server")),
     );
     let tcp_target = std::net::TcpListener::bind(ephemeral_addr()).unwrap();
     let udp_target = UdpSocket::bind(ephemeral_addr()).unwrap();
@@ -2860,7 +2860,7 @@ fn migrated_connections_stay_on_reuseport_owner() {
         dir.path(),
         "server",
         &server_key,
-        &self_signed(&server_key, Some("masque-server")),
+        &self_signed(&server_key, Some("laz-masque-server")),
     );
     let client_key = p256_key();
     let (client_cert, client_key_path) = write_pem(
@@ -2934,7 +2934,7 @@ fn migration_to_a_full_source_is_closed() {
         dir.path(),
         "server",
         &server_key,
-        &self_signed(&server_key, Some("masque-server")),
+        &self_signed(&server_key, Some("laz-masque-server")),
     );
     let client_key = p256_key();
     let (client_cert, client_key_path) = write_pem(
@@ -3046,7 +3046,7 @@ fn exhausted_address_pool_returns_503_instead_of_an_early_200() {
         dir.path(),
         "server",
         &server_key,
-        &self_signed(&server_key, Some("masque-server")),
+        &self_signed(&server_key, Some("laz-masque-server")),
     );
 
     let first_key = p256_key();

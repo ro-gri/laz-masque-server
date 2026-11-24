@@ -1,7 +1,7 @@
 # Troubleshooting
 
 Separate client-path failures from server-host failures before changing tuning
-or firewall rules. `masque-probe` exercises the actual protocol from the client
+or firewall rules. `laz-masque-probe` exercises the actual protocol from the client
 network; `check-config`, `doctor`, and `support-bundle` inspect the server
 without changing it.
 
@@ -18,10 +18,10 @@ change, and server/probe versions when known. Use generic host roles in reports.
 | Bounded fleet `diagnose` | Filtered, time-relevant service diagnostics | Complete history or absence of sensitive client/destination metadata |
 | Local `check-config` and `status` | Disk validity; `status` also compares loaded configuration when its private live socket is available | External connectivity; loaded state when status says `unknown` |
 | Local `doctor` | Read-only evidence of CONNECT-IP host prerequisites | A successful forwarding path or the correctness of all firewall and network state |
-| Client-side `masque-probe --json` | Results for the checks actually run from that client path, including selected transport, warning/failure codes and duration | Unselected or skipped transports, every client network, or CONNECT-IP packet forwarding from negotiation alone |
+| Client-side `laz-masque-probe --json` | Results for the checks actually run from that client path, including selected transport, warning/failure codes and duration | Unselected or skipped transports, every client network, or CONNECT-IP packet forwarding from negotiation alone |
 | Local `support-bundle` | Structured snapshot of a valid configuration, service metadata, and diagnostic result levels | Invalid configurations, logs, actual traffic, or end-to-end success |
 
-For a fleet, use the `masque-ops` Skill's `validate`, `status`, and bounded
+For a fleet, use the `laz-masque-ops` Skill's `validate`, `status`, and bounded
 `diagnose` flow; do not replace it with ad hoc SSH or read private inventory.
 For local diagnosis, choose the corresponding local commands below. A support
 bundle is produced only after configuration validation succeeds; if validation
@@ -61,10 +61,10 @@ Install the standalone probe on a Linux or macOS x86_64/ARM64 client; the
 installer selects the local architecture and verifies the release SHA-256:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/zenith-ent/masque-server/main/install-probe.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ro-gri/laz-masque-server/main/install-probe.sh | sh
 ```
 
-Linux server archives also install `/usr/local/bin/masque-probe` beside the
+Linux server archives also install `/usr/local/bin/laz-masque-probe` beside the
 service. Run it from the same network and interface as the application that
 fails.
 
@@ -72,7 +72,7 @@ For Basic authentication, pass the password on stdin so it never appears in
 the process list:
 
 ```sh
-printf '%s' 'client-password' | masque-probe proxy.example.com:8449 \
+printf '%s' 'client-password' | laz-masque-probe proxy.example.com:8449 \
   --username client-name --password-stdin
 ```
 
@@ -80,7 +80,7 @@ For client-certificate authentication, use the secret enrollment JSON produced
 by `enroll-client`:
 
 ```sh
-masque-probe proxy.example.com:4443 --client-config client.json --connect-ip
+laz-masque-probe proxy.example.com:4443 --client-config client.json --connect-ip
 ```
 
 The default `--transport auto` tries HTTP/3 first. If UDP/QUIC cannot establish
@@ -123,7 +123,7 @@ proxy rather than to the server. Retain the hostname for TLS and HTTP while
 dialing the real address explicitly:
 
 ```sh
-masque-probe proxy.example.com:8449 --resolve 203.0.113.9 \
+laz-masque-probe proxy.example.com:8449 --resolve 203.0.113.9 \
   --username client-name --password-stdin
 ```
 
@@ -140,7 +140,7 @@ only when a transport was selected and no check failed. Warnings, including a
 successful HTTP/2 fallback, do not fail the run.
 
 ```sh
-printf '%s' 'client-password' | masque-probe proxy.example.com:8449 \
+printf '%s' 'client-password' | laz-masque-probe proxy.example.com:8449 \
   --username client-name --password-stdin --json >probe.json
 ```
 
@@ -169,8 +169,8 @@ First validate what the process would load, then inspect CONNECT-IP host
 prerequisites:
 
 ```sh
-sudo masque-server --config /etc/masque/masque.toml check-config
-sudo masque-server --config /etc/masque/masque.toml doctor
+sudo laz-masque-server --config /etc/masque/masque.toml check-config
+sudo laz-masque-server --config /etc/masque/masque.toml doctor
 sudo systemctl status masque --no-pager
 ```
 
@@ -184,7 +184,7 @@ does not install a route, modify a sysctl, or change a firewall.
 For a persistent problem, create one attachable report:
 
 ```sh
-sudo masque-server --config /etc/masque/masque.toml support-bundle \
+sudo laz-masque-server --config /etc/masque/masque.toml support-bundle \
   --out /root/masque-support.json
 ```
 
@@ -199,7 +199,7 @@ syncs it, and refuses to overwrite any existing path. The JSON includes:
 - TLS file existence/size/permissions and certificate validity window;
 - read-only CONNECT-IP diagnostic names and result levels (free-form command
   output is excluded); and
-- bounded `masque.service` load/active/enabled state when systemd is available.
+- bounded `laz-masque.service` load/active/enabled state when systemd is available.
 
 It deliberately excludes raw configuration, usernames and password hashes,
 client labels and assigned addresses, certificate identity/serial, public and

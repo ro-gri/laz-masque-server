@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-REPOSITORY=${MASQUE_GITHUB_REPOSITORY:-zenith-ent/masque-server}
+REPOSITORY=${MASQUE_GITHUB_REPOSITORY:-ro-gri/laz-masque-server}
 DOWNLOAD_DIR=
 INSTALL_TMP=
 
@@ -22,12 +22,12 @@ trap 'exit 1' HUP INT TERM
 case "$(uname -s)" in
     Linux) PLATFORM=linux ;;
     Darwin) PLATFORM=macos ;;
-    *) die "masque-probe prebuilt binaries support Linux and macOS only" ;;
+    *) die "laz-masque-probe prebuilt binaries support Linux and macOS only" ;;
 esac
 case "$(uname -m)" in
     x86_64|amd64) ARCH=x86_64 ;;
     aarch64|arm64) ARCH=aarch64 ;;
-    *) die "masque-probe prebuilt binaries support x86_64 and ARM64 only" ;;
+    *) die "laz-masque-probe prebuilt binaries support x86_64 and ARM64 only" ;;
 esac
 
 for required_command in curl tar awk grep mktemp install; do
@@ -65,25 +65,26 @@ else
     esac
 fi
 
+# GitHub may percent-encode '+' in the latest-release redirect.
+RELEASE_TAG=$(printf '%s' "$RELEASE_TAG" | sed 's/%2[Bb]/+/g')
 case "$RELEASE_TAG" in
-    v[0-9A-Za-z]*) ;;
-    *) die "invalid release tag: $RELEASE_TAG" ;;
+    *[!0-9A-Za-z.+-]*) die "invalid release tag: $RELEASE_TAG" ;;
 esac
-case "$RELEASE_TAG" in
-    *[!0-9A-Za-z._-]*) die "invalid release tag: $RELEASE_TAG" ;;
-esac
+if ! printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+    die "invalid release tag: $RELEASE_TAG"
+fi
 
 VERSION=${RELEASE_TAG#v}
-ARCHIVE_NAME=masque-probe-v${VERSION}-${PLATFORM}-${ARCH}.tar.gz
+ARCHIVE_NAME=laz-masque-probe-v${VERSION}-${PLATFORM}-${ARCH}.tar.gz
 CHECKSUM_NAME=$ARCHIVE_NAME.sha256
 DOWNLOAD_BASE=https://github.com/$REPOSITORY/releases/download/$RELEASE_TAG
 
-DOWNLOAD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/masque-probe-install.XXXXXX")
+DOWNLOAD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/laz-masque-probe-install.XXXXXX")
 chmod 0700 "$DOWNLOAD_DIR"
 ARCHIVE_PATH=$DOWNLOAD_DIR/$ARCHIVE_NAME
 CHECKSUM_PATH=$DOWNLOAD_DIR/$CHECKSUM_NAME
 
-echo "Downloading masque-probe $RELEASE_TAG for $PLATFORM/$ARCH ..."
+echo "Downloading laz-masque-probe $RELEASE_TAG for $PLATFORM/$ARCH ..."
 curl -fL --retry 3 -o "$ARCHIVE_PATH" "$DOWNLOAD_BASE/$ARCHIVE_NAME"
 curl -fL --retry 3 -o "$CHECKSUM_PATH" "$DOWNLOAD_BASE/$CHECKSUM_NAME"
 
@@ -101,11 +102,11 @@ if tar tzf "$ARCHIVE_PATH" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
 fi
 tar xzf "$ARCHIVE_PATH" -C "$DOWNLOAD_DIR"
 
-PACKAGE_DIR=$DOWNLOAD_DIR/masque-probe-v${VERSION}-${PLATFORM}-${ARCH}
-CANDIDATE=$PACKAGE_DIR/bin/masque-probe
-[ -x "$CANDIDATE" ] || die "the release archive does not contain masque-probe"
+PACKAGE_DIR=$DOWNLOAD_DIR/laz-masque-probe-v${VERSION}-${PLATFORM}-${ARCH}
+CANDIDATE=$PACKAGE_DIR/bin/laz-masque-probe
+[ -x "$CANDIDATE" ] || die "the release archive does not contain laz-masque-probe"
 CANDIDATE_VERSION=$($CANDIDATE --version 2>/dev/null) ||
-    die "the downloaded masque-probe cannot run on this machine"
+    die "the downloaded laz-masque-probe cannot run on this machine"
 case "$CANDIDATE_VERSION" in
     *" $VERSION") ;;
     *) die "the downloaded probe version does not match $RELEASE_TAG" ;;
@@ -124,13 +125,13 @@ case "$INSTALL_DIR" in
 esac
 
 install -d -m 0755 "$INSTALL_DIR"
-INSTALL_TMP=$(mktemp "$INSTALL_DIR/.masque-probe.install.XXXXXX")
+INSTALL_TMP=$(mktemp "$INSTALL_DIR/.laz-masque-probe.install.XXXXXX")
 install -m 0755 "$CANDIDATE" "$INSTALL_TMP"
-mv -f -- "$INSTALL_TMP" "$INSTALL_DIR/masque-probe"
+mv -f -- "$INSTALL_TMP" "$INSTALL_DIR/laz-masque-probe"
 INSTALL_TMP=
 
 echo "Verified SHA-256: $ACTUAL_SHA256"
-echo "Installed $CANDIDATE_VERSION at $INSTALL_DIR/masque-probe"
+echo "Installed $CANDIDATE_VERSION at $INSTALL_DIR/laz-masque-probe"
 case ":${PATH:-}:" in
     *":$INSTALL_DIR:"*) ;;
     *) echo "Add $INSTALL_DIR to PATH, or set probe_binary to this absolute path." ;;

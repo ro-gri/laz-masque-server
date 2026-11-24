@@ -1,22 +1,22 @@
 [package]
-name = "masque-e2e"
-version = "0.1.0"
+name = "laz-masque-e2e"
+version = "0.1.0+masque.0.15.0"
 edition = "2024"
 rust-version = "1.88"
-description = "End-to-end and benchmark client for masque-server development"
+description = "End-to-end and benchmark client for laz-masque-server development"
 license = "MIT"
-repository = "https://github.com/zenith-ent/masque-server"
+repository = "https://github.com/ro-gri/laz-masque-server"
 publish = false
 
 [lints]
 workspace = true
 
 [[bin]]
-name = "masque-e2e"
+name = "laz-masque-e2e"
 path = "src/main.rs"
 
 [dependencies]
-masque = { package = "masque-server", path = "../.." }
+masque = { package = "laz-masque-server", path = "../.." }
 quiche = "0.30.0"
 anyhow = "1"
 base64 = "0.22.1"

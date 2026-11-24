@@ -12,9 +12,9 @@ For an advanced inventory, resolve paths relative to the Skill directory and
 copy `assets/fleet.example.toml` to the private inventory location:
 
 ```sh
-install -d -m 0700 ~/.config/masque-server ~/.config/masque-server/secrets
+install -d -m 0700 ~/.config/laz-masque-server ~/.config/laz-masque-server/secrets
 install -m 0600 assets/fleet.example.toml \
-  ~/.config/masque-server/fleet.toml
+  ~/.config/laz-masque-server/fleet.toml
 ```
 
 Replace every example address and probe endpoint. Keep the inventory, SSH
@@ -27,8 +27,8 @@ An AI agent must pass the inventory path to the CLI without opening the file.
 Successful CLI output deliberately omits SSH addresses, identity paths, remote
 certificate paths, usernames, passwords, and generated client-file paths.
 
-The CLI targets the official package layout (`masque.service`,
-`/etc/masque/masque.toml`, and `/usr/local/bin/masque-server`). These paths are
+The CLI targets the official package layout (`laz-masque.service`,
+`/etc/masque/masque.toml`, and `/usr/local/bin/laz-masque-server`). These paths are
 not inventory options because allowing them to diverge from the fixed remote
 helper would make preflight results ambiguous.
 
@@ -39,13 +39,13 @@ as the trust decision.
 
 ## Remote privilege boundary
 
-Release archives install the root-owned `/usr/local/sbin/masque-maintain`
+Release archives install the root-owned `/usr/local/sbin/laz-masque-maintain`
 entrypoint. It accepts only:
 
 ```text
-masque-maintain status
-masque-maintain diagnose [1..500]
-masque-maintain upgrade vVERSION
+laz-masque-maintain status
+laz-masque-maintain diagnose [1..500]
+laz-masque-maintain upgrade vVERSION
 ```
 
 It cannot edit MASQUE configuration, TLS material, forwarding, routes,
@@ -54,9 +54,9 @@ sudo. Validate the policy with `visudo -cf` before installing it; a suitable
 policy is:
 
 ```sudoers
-Cmnd_Alias MASQUE_STATUS = /usr/local/sbin/masque-maintain status
-Cmnd_Alias MASQUE_DIAGNOSE = /usr/local/sbin/masque-maintain diagnose, /usr/local/sbin/masque-maintain diagnose [0-9]*
-Cmnd_Alias MASQUE_UPGRADE = /usr/local/sbin/masque-maintain upgrade v[0-9]*
+Cmnd_Alias MASQUE_STATUS = /usr/local/sbin/laz-masque-maintain status
+Cmnd_Alias MASQUE_DIAGNOSE = /usr/local/sbin/laz-masque-maintain diagnose, /usr/local/sbin/laz-masque-maintain diagnose [0-9]*
+Cmnd_Alias MASQUE_UPGRADE = /usr/local/sbin/laz-masque-maintain upgrade v[0-9]*
 masque-deploy ALL=(root) NOPASSWD: MASQUE_STATUS, MASQUE_DIAGNOSE, MASQUE_UPGRADE
 ```
 
@@ -83,7 +83,7 @@ credentials, its paths must match the bootstrap paths exactly. See
 
 ## External probes
 
-A guided first-time setup is available through `masque-ops configure-probe`.
+A guided first-time setup is available through `laz-masque-ops configure-probe`.
 It selects the sole host or fleet canary by default, prompts for connection details and
 authentication, performs a real probe, and saves the configuration only after
 success. It never overwrites an existing probe. A Basic password entered at the
@@ -92,7 +92,7 @@ or certificate enrollment JSON can also be supplied with command options.
 The AI should let the operator enter secrets locally rather than requesting
 them in conversation. See `configure-probe --help` and the operations guide.
 
-A host's optional `[hosts.probe]` runs `masque-probe` on the administration
+A host's optional `[hosts.probe]` runs `laz-masque-probe` on the administration
 machine after a deployment. Add `[[hosts.probes]]` tables for other required
 authentication/endpoint/transport combinations. They use the same fields as
 `[hosts.probe]`, but require an explicit `transport = "http2"` or `"http3"`.
@@ -120,7 +120,7 @@ every required H2/H3 endpoint and credential combination in the private inventor
 
 Basic authentication uses `username` plus a
 `password_file`; the password file is connected directly to probe stdin and is
-never placed in the process arguments or parsed by `masque-ops`. Certificate
+never placed in the process arguments or parsed by `laz-masque-ops`. Certificate
 authentication uses `client_config`. A rollout normally requires a probe for
 the sole host or canary unless the operator explicitly accepts the weaker
 `--allow-no-probe` check.

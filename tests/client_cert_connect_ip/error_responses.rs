@@ -7,7 +7,7 @@ fn error_server(mut config: ServerConfig) -> (TempDir, SocketAddr, Option<Socket
         dir.path(),
         "server",
         &key,
-        &self_signed(&key, Some("masque-server")),
+        &self_signed(&key, Some("laz-masque-server")),
     );
     config.tls.cert_path = cert;
     config.tls.key_path = key;

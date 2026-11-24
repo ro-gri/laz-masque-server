@@ -6,14 +6,14 @@ GitHub Actions builds static `x86_64-unknown-linux-musl` and
 `aarch64-unknown-linux-musl` binaries and packages:
 
 ```text
-bin/masque-server
-bin/masque-probe
+bin/laz-masque-server
+bin/laz-masque-probe
 config/masque.toml
-maintenance/masque-maintain
+maintenance/laz-masque-maintain
 maintenance/install-latest.sh
 monitoring/prometheus-rules.yml
 monitoring/grafana-dashboard.json
-systemd/masque.service
+systemd/laz-masque.service
 install.sh
 README.md
 ```
@@ -21,10 +21,10 @@ README.md
 Verify the archive before extraction:
 
 ```sh
-sha256sum --check masque-vVERSION-linux-ARCH.tar.gz.sha256
+sha256sum --check laz-masque-server-vVERSION-linux-ARCH.tar.gz.sha256
 ```
 
-Releases also publish standalone `masque-probe` archives for Linux and macOS,
+Releases also publish standalone `laz-masque-probe` archives for Linux and macOS,
 on both x86_64 and ARM64. `install-probe.sh` detects the local pair and verifies
 the archive SHA-256 before installing it.
 
@@ -35,7 +35,7 @@ resolves the latest stable GitHub release, downloads its archive and checksum,
 verifies SHA-256, and invokes the installer from that archive:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/zenith-ent/masque-server/main/install-latest.sh | sudo sh
+curl -fsSL https://raw.githubusercontent.com/ro-gri/laz-masque-server/main/install-latest.sh | sudo sh
 ```
 
 Although the script arrives on standard input, interactive answers are read
@@ -100,7 +100,7 @@ The following environment variables make provisioning non-interactive:
 For example, a non-interactive client-certificate installation is:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/zenith-ent/masque-server/main/install-latest.sh | \
+curl -fsSL https://raw.githubusercontent.com/ro-gri/laz-masque-server/main/install-latest.sh | \
   sudo env \
     MASQUE_AUTH_MODE=client_cert \
     MASQUE_TLS_CERT=/root/fullchain.pem \
@@ -138,8 +138,8 @@ recorded rollback, see [AI-assisted fleet operations](operations.md).
 ## Install a downloaded archive
 
 ```sh
-tar xzf masque-vVERSION-linux-ARCH.tar.gz
-cd masque-vVERSION-linux-ARCH
+tar xzf laz-masque-server-vVERSION-linux-ARCH.tar.gz
+cd laz-masque-server-vVERSION-linux-ARCH
 sudo ./install.sh
 ```
 
@@ -161,13 +161,13 @@ sets it to `1` by default.
 
 The installer creates:
 
-- `/usr/local/bin/masque-server`;
-- `/usr/local/bin/masque-probe`;
+- `/usr/local/bin/laz-masque-server`;
+- `/usr/local/bin/laz-masque-probe`;
 - `/etc/masque/masque.toml`;
 - `/etc/masque/certs/`;
-- `/etc/systemd/system/masque.service`;
-- `/usr/local/share/masque-server/monitoring/prometheus-rules.yml`;
-- `/usr/local/share/masque-server/monitoring/grafana-dashboard.json`; and
+- `/etc/systemd/system/laz-masque.service`;
+- `/usr/local/share/laz-masque-server/monitoring/prometheus-rules.yml`;
+- `/usr/local/share/laz-masque-server/monitoring/grafana-dashboard.json`; and
 - the unprivileged `masque` user and group.
 
 It preserves every existing configuration and referenced TLS file byte for
@@ -176,7 +176,7 @@ byte during an upgrade.
 ## Local status and reload feedback
 
 ```sh
-sudo masque-server --config /etc/masque/masque.toml status
+sudo laz-masque-server --config /etc/masque/masque.toml status
 ```
 
 The read-only overview reports the systemd service state, the on-disk
@@ -208,7 +208,7 @@ external probe for those checks. Use the journal for details:
 
 ```sh
 sudo systemctl reload masque
-sudo masque-server --config /etc/masque/masque.toml status
+sudo laz-masque-server --config /etc/masque/masque.toml status
 sudo journalctl -u masque -n 20 --no-pager
 ```
 
@@ -276,7 +276,7 @@ regardless of the authentication mode.
 After the service has created its TUN interface, run the read-only diagnostic:
 
 ```sh
-sudo masque-server --config /etc/masque/masque.toml doctor
+sudo laz-masque-server --config /etc/masque/masque.toml doctor
 ```
 
 It checks `/dev/net/tun`, IPv4/IPv6 forwarding, the configured interface and
@@ -303,7 +303,7 @@ both capabilities can be removed from a local override.
 Check the effective sandbox:
 
 ```sh
-systemd-analyze security masque.service
+systemd-analyze security laz-masque.service
 ```
 
 ## Add a listener after installation
@@ -313,7 +313,7 @@ the existing file untouched. To add one to a deployed server — a second socket
 for the authentication mode the first does not serve, for example — use:
 
 ```sh
-sudo masque-server --config /etc/masque/masque.toml add-listener
+sudo laz-masque-server --config /etc/masque/masque.toml add-listener
 sudo systemctl restart masque
 ```
 
@@ -370,14 +370,14 @@ roster revocation disconnects the affected client. Manage Basic accounts with
 For the latest stable release, rerun the bootstrap command:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/zenith-ent/masque-server/main/install-latest.sh | sudo sh
+curl -fsSL https://raw.githubusercontent.com/ro-gri/laz-masque-server/main/install-latest.sh | sudo sh
 sudo systemctl status masque --no-pager
 ```
 
 The candidate first runs the equivalent of:
 
 ```sh
-masque-server --config /etc/masque/masque.toml check-config
+laz-masque-server --config /etc/masque/masque.toml check-config
 ```
 
 This validates the parts of startup that do not need live resources. A file
@@ -401,27 +401,27 @@ Start with configuration and host diagnostics, then confirm the listener and
 process:
 
 ```sh
-sudo masque-server --config /etc/masque/masque.toml check-config
-sudo masque-server --config /etc/masque/masque.toml doctor
-sudo ss -u -l -p | grep masque-server
-sudo ss -t -l -p | grep masque-server
+sudo laz-masque-server --config /etc/masque/masque.toml check-config
+sudo laz-masque-server --config /etc/masque/masque.toml doctor
+sudo ss -u -l -p | grep laz-masque-server
+sudo ss -t -l -p | grep laz-masque-server
 systemctl show masque -p MainPID -p ActiveState -p SubState
 ```
 
-From the affected client network, run `masque-probe` with Basic credentials or
+From the affected client network, run `laz-masque-probe` with Basic credentials or
 an enrollment JSON. It validates real upstream TCP CONNECT establishment and a
 CONNECT-UDP DNS round trip instead of merely checking whether the port opens:
 
 ```sh
-printf '%s' 'client-password' | masque-probe proxy.example.com:8449 \
+printf '%s' 'client-password' | laz-masque-probe proxy.example.com:8449 \
   --username client-name --password-stdin
-masque-probe proxy.example.com:4443 --client-config client.json --connect-ip
+laz-masque-probe proxy.example.com:4443 --client-config client.json --connect-ip
 ```
 
 Create a private, shareable server report with:
 
 ```sh
-sudo masque-server --config /etc/masque/masque.toml support-bundle \
+sudo laz-masque-server --config /etc/masque/masque.toml support-bundle \
   --out /root/masque-support.json
 ```
 
@@ -434,7 +434,7 @@ Inspect UDP batching during a controlled benchmark:
 
 ```sh
 sudo strace -f -c -e trace=sendmmsg,sendmsg,recvmmsg \
-  -p "$(pidof masque-server)"
+  -p "$(pidof laz-masque-server)"
 ```
 
 The musl release should show real `sendmmsg` and `recvmmsg` calls. Run tracing

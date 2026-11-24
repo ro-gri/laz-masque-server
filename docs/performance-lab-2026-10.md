@@ -1,5 +1,8 @@
 # Linux loopback performance investigation
 
+Historical measurements and release versions below refer to upstream MASQUE
+Server before this fork; they are not measurements of Laz MASQUE Server 0.1.0.
+
 These measurements are from a four-vCPU Linux test VM using the v0.14.1
 server. The client, server and echo target shared the VM. They do not measure a
 provider's virtual NIC, an external network, or a production deployment. The

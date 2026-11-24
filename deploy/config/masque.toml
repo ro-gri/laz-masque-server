@@ -95,7 +95,7 @@ password_hash = "__MASQUE_AUTH_PASSWORD_HASH__"
 # Clients allowed in when mode = "client_cert". Generate an entry, then reload
 # (which also re-reads the TLS identity) or restart the service:
 #
-#   masque-server enroll-client --name laptop --endpoint <public-ip>:443 \
+#   laz-masque-server enroll-client --name laptop --endpoint <public-ip>:443 \
 #       --ipv4 10.89.0.2 --ipv6 fd00:abcd::2
 #
 # That prints this block plus the client's own configuration file. The pinned
@@ -228,7 +228,7 @@ require_tun = false
 # The process creates the TUN and relays packets to it, but never changes host
 # forwarding, routes, firewall rules, or NAT. After startup, inspect those
 # operator-managed prerequisites with:
-#   masque-server --config /etc/masque/masque.toml doctor
+#   laz-masque-server --config /etc/masque/masque.toml doctor
 # Standard connect-ip matches this complete path/query template. Full tunnels
 # use /.well-known/masque/ip/*/*/. Scoped requests are rejected (501), not
 # silently widened; cf-connect-ip keeps its deployed path behavior.
@@ -247,7 +247,7 @@ ipv6_pool = "fd00:abcd::/64"
 
 # ── Additional listener ─────────────────────────────────────────────
 #
-# `masque-server --config /etc/masque/masque.toml add-listener` appends one of
+# `laz-masque-server --config /etc/masque/masque.toml add-listener` appends one of
 # these for you: it asks for the address, the authentication mode, and any
 # credentials, validates the result the way check-config does, and leaves this
 # file untouched if the new listener would not start.
@@ -283,7 +283,7 @@ ipv6_pool = "fd00:abcd::/64"
 # [outbound]
 # default_route = "socks5"
 # direct_cidrs = []
-# direct_cidrs_file = "/etc/masque-server/ru-cidrs.txt"
+# direct_cidrs_file = "/etc/laz-masque-server/ru-cidrs.txt"
 #
 # [outbound.socks5]
 # endpoint = "127.0.0.1:1080"
@@ -292,4 +292,4 @@ ipv6_pool = "fd00:abcd::/64"
 # udp_max_packet_size = 65507 # Generic SOCKS5 packet budget, includes header
 # Provider-specific overrides are documented in docs/outbound-routing.md.
 # username = "masque"
-# password_file = "/etc/masque-server/socks5-password"
+# password_file = "/etc/laz-masque-server/socks5-password"

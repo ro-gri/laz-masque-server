@@ -7,7 +7,7 @@ fn grafana_dashboard_is_valid_json_with_unique_panel_ids() {
         std::fs::read_to_string(root.join("deploy/monitoring/grafana-dashboard.json")).unwrap();
     let dashboard: serde_json::Value = serde_json::from_str(&text).unwrap();
 
-    assert_eq!(dashboard["uid"], "masque-server");
+    assert_eq!(dashboard["uid"], "laz-masque-server");
     let panels = dashboard["panels"].as_array().unwrap();
     assert!(panels.len() >= 10);
     let mut ids: Vec<u64> = panels
@@ -55,7 +55,7 @@ fn release_packager_includes_operational_assets() {
     let script = std::fs::read_to_string(root.join("scripts/package-linux.sh")).unwrap();
     assert!(script.contains("monitoring/prometheus-rules.yml"));
     assert!(script.contains("monitoring/grafana-dashboard.json"));
-    assert!(script.contains("bin/masque-probe"));
-    assert!(script.contains("maintenance/masque-maintain"));
+    assert!(script.contains("bin/laz-masque-probe"));
+    assert!(script.contains("maintenance/laz-masque-maintain"));
     assert!(script.contains("maintenance/install-latest.sh"));
 }

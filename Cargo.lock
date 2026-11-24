@@ -866,8 +866,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
-name = "masque-e2e"
-version = "0.1.0"
+name = "laz-masque-e2e"
+version = "0.1.0+masque.0.15.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -876,7 +876,7 @@ dependencies = [
  "h2",
  "http",
  "libc",
- "masque-server",
+ "laz-masque-server",
  "quiche",
  "ring",
  "tokio",
@@ -886,8 +886,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "masque-probe"
-version = "0.15.0"
+name = "laz-masque-probe"
+version = "0.1.0+masque.0.15.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -897,7 +897,7 @@ dependencies = [
  "h2",
  "http",
  "libc",
- "masque-server",
+ "laz-masque-server",
  "quiche",
  "ring",
  "serde",
@@ -908,8 +908,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "masque-server"
-version = "0.15.0"
+name = "laz-masque-server"
+version = "0.1.0+masque.0.15.0"
 dependencies = [
  "anyhow",
  "argon2",

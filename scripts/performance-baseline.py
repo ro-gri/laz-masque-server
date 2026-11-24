@@ -377,9 +377,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", choices=("quick", "standard", "gso", "congestion"), default="standard")
     parser.add_argument("--bin-dir", type=Path, help="prebuilt workspace binaries; skips the build")
-    parser.add_argument("--server", type=Path, help="candidate server, defaults to bin-dir/masque-server")
+    parser.add_argument("--server", type=Path, help="candidate server, defaults to bin-dir/laz-masque-server")
     reference = parser.add_mutually_exclusive_group()
-    reference.add_argument("--reference-server", type=Path, help="another compatible MASQUE Server build for alternating A/B runs")
+    reference.add_argument("--reference-server", type=Path, help="another compatible Laz MASQUE Server build for alternating A/B runs")
     reference.add_argument("--reference-cc", choices=("cubic", "reno", "bbr2"),
                            help="compare controllers on the same server binary instead of changing the build")
     parser.add_argument("--output", type=Path, help="new private output directory outside the checkout")
@@ -421,10 +421,10 @@ def main():
     if not args.bin_dir:
         subprocess.run(["cargo", "build", "--workspace", "--release", "--locked"], cwd=ROOT, check=True)
     bin_dir = (args.bin_dir or ROOT / "target/release").resolve()
-    servers = {"candidate": (args.server or bin_dir / "masque-server").resolve()}
+    servers = {"candidate": (args.server or bin_dir / "laz-masque-server").resolve()}
     if has_reference:
         servers["reference"] = args.reference_server.resolve() if args.reference_server else servers["candidate"]
-    for path in [*servers.values(), bin_dir / "masque-e2e"]:
+    for path in [*servers.values(), bin_dir / "laz-masque-e2e"]:
         if not path.is_file() or not os.access(path, os.X_OK):
             parser.error("an executable is missing; build the release workspace first")
     labels = ["reference", "candidate"] if has_reference else ["candidate"]
@@ -432,7 +432,7 @@ def main():
     report = {
         "schema_version": 2, "platform": {"os": sys.platform, "arch": platform.machine()},
         "server_sha256": {label: hashlib.sha256(path.read_bytes()).hexdigest() for label, path in servers.items()},
-        "client_sha256": hashlib.sha256((bin_dir / "masque-e2e").read_bytes()).hexdigest(),
+        "client_sha256": hashlib.sha256((bin_dir / "laz-masque-e2e").read_bytes()).hexdigest(),
         "config": {key: getattr(args, key) for key in ("rounds", "duration", "window", "expiry_ms", "rtt_samples", "connections", "tcp_bytes", "cc", "reference_cc", "regression_pct", "shortfall_tolerance_pp")},
         "controllers": {label: args.reference_cc if label == "reference" and args.reference_cc else args.cc for label in labels},
         "cases": workloads, "runs": [], "complete": False,

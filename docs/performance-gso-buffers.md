@@ -1,5 +1,8 @@
 # QUIC GSO and socket-buffer verification
 
+Historical measurements and release versions below refer to upstream MASQUE
+Server before this fork; they are not measurements of Laz MASQUE Server 0.1.0.
+
 This experiment separates application/socket limits from external-path GSO
 support. It adds explicit, bounded per-shard `SO_RCVBUF` / `SO_SNDBUF` requests
 and actual-size reporting; old configurations retain their OS defaults.

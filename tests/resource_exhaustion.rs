@@ -377,7 +377,7 @@ async fn hostile_inputs_stay_inside_cpu_memory_and_fd_bounds() {
 
     let server_binary = std::env::var_os("MASQUE_RESOURCE_SERVER_BIN")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_masque-server")));
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_laz-masque-server")));
     let mut child = Command::new(server_binary)
         .arg("--config")
         .arg(config)

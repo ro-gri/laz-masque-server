@@ -27,7 +27,7 @@ write_manifest() {
 members = ["."]
 
 [package]
-name = "masque-server"
+name = "laz-masque-server"
 version = "$version"
 EOF
 }
@@ -38,7 +38,7 @@ write_lockfile() {
 version = 4
 
 [[package]]
-name = "masque-server"
+name = "laz-masque-server"
 version = "$version"
 EOF
 }
@@ -74,42 +74,55 @@ expect_failure() {
     fi
 }
 
-write_manifest 0.5.1
-write_lockfile 0.5.1
-write_changelog 0.5.1 2026-08-21
-validate v0.5.1 >/dev/null || die "matching release metadata was rejected"
+write_manifest 0.5.1+masque.0.15.0
+write_lockfile 0.5.1+masque.0.15.0
+write_changelog 0.5.1+masque.0.15.0 2026-08-21
+validate v0.5.1+masque.0.15.0 >/dev/null || die "matching release metadata was rejected"
 
-expect_failure "mismatched tag" validate v0.5.0
+expect_failure "mismatched tag" validate v0.5.0+masque.0.15.0
 
-write_manifest 0.5.2
-expect_failure "mismatched manifest" validate v0.5.1
-write_manifest 0.5.1
+write_manifest 0.5.2+masque.0.15.0
+expect_failure "mismatched manifest" validate v0.5.1+masque.0.15.0
+write_manifest 0.5.1+masque.0.15.0
 
-write_lockfile 0.5.0
-expect_failure "mismatched lockfile" validate v0.5.1
-write_lockfile 0.5.1
+write_lockfile 0.5.0+masque.0.15.0
+expect_failure "mismatched lockfile" validate v0.5.1+masque.0.15.0
+write_lockfile 0.5.1+masque.0.15.0
 
-write_changelog 0.5.1 not-a-date
-expect_failure "malformed changelog date" validate v0.5.1
-
-cat >"$CHANGELOG" <<'EOF'
-# Changelog
-
-## 0.5.1 - 2026-08-21
-
-## Unreleased
-EOF
-expect_failure "release before Unreleased" validate v0.5.1
+write_changelog 0.5.1+masque.0.15.0 not-a-date
+expect_failure "malformed changelog date" validate v0.5.1+masque.0.15.0
 
 cat >"$CHANGELOG" <<'EOF'
 # Changelog
 
+## 0.5.1+masque.0.15.0 - 2026-08-21
+
+## Unreleased
+EOF
+expect_failure "release before Unreleased" validate v0.5.1+masque.0.15.0
+
+cat >"$CHANGELOG" <<'EOF'
+# Changelog
+
 ## Unreleased
 
-## 0.5.1 - 2026-08-21
+## 0.5.1+masque.0.15.0 - 2026-08-21
 
-## 0.5.1 - 2026-08-22
+## 0.5.1+masque.0.15.0 - 2026-08-22
 EOF
-expect_failure "duplicate release heading" validate v0.5.1
+expect_failure "duplicate release heading" validate v0.5.1+masque.0.15.0
+
+# Reject invalid schemes even when all metadata files agree.
+for invalid in '0.1.0' '0.1.0+other.0.15.0' '0.1.0+masque.01.15.0' '0.1.0-01+masque.0.15.0' '0.1.0+masque.0.15.0/extra' '0.1.0+masque.0.15.0
+extra'; do
+    write_manifest "$invalid"
+    write_lockfile "$invalid"
+    write_changelog "$invalid" 2026-11-25
+    expect_failure "invalid release scheme $invalid" validate "v$invalid"
+done
+write_manifest 0.1.0-rc.1+masque.0.15.0
+write_lockfile 0.1.0-rc.1+masque.0.15.0
+write_changelog 0.1.0-rc.1+masque.0.15.0 2026-11-25
+validate v0.1.0-rc.1+masque.0.15.0 >/dev/null
 
 echo "release metadata validation passed"

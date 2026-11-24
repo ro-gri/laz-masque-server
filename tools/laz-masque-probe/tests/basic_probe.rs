@@ -24,7 +24,7 @@ struct TempTls {
 impl TempTls {
     fn new() -> Self {
         let directory = std::env::temp_dir().join(format!(
-            "masque-probe-it-{}-{:?}",
+            "laz-masque-probe-it-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
@@ -207,7 +207,7 @@ async fn spawn_certificate_server(
 }
 
 fn run_probe(endpoint: SocketAddr, target: SocketAddr, transport: &str) -> std::process::Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_masque-probe"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_laz-masque-probe"))
         .args([
             &endpoint.to_string(),
             "--transport",
@@ -281,7 +281,7 @@ fn run_certificate_probe(
     transport: &str,
     client_config: &Path,
 ) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_masque-probe"))
+    Command::new(env!("CARGO_BIN_EXE_laz-masque-probe"))
         .args([
             &endpoint.to_string(),
             "--transport",
@@ -395,7 +395,7 @@ fn run_payload_probe(
     transport: &str,
     options: &[String],
 ) -> serde_json::Value {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_masque-probe"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_laz-masque-probe"))
         .args([
             &endpoint.to_string(),
             "--transport",

@@ -8,7 +8,7 @@ die() {
     exit 1
 }
 
-TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/masque-ops-installer.XXXXXX")
+TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/laz-masque-ops-installer.XXXXXX")
 cleanup() {
     rm -rf -- "$TEST_TMP"
 }
@@ -24,19 +24,19 @@ FIXTURES=$TEST_TMP/fixtures
 MOCK_BIN=$TEST_TMP/mock-bin
 SKILLS_DIR=$TEST_TMP/home/.agents/skills
 BIN_DIR=$TEST_TMP/home/.local/bin
-CONFIG_DIR=$TEST_TMP/home/.config/masque-server
+CONFIG_DIR=$TEST_TMP/home/.config/laz-masque-server
 install -d "$FIXTURES" "$MOCK_BIN"
 export FIXTURES
 
 OUTPUT_DIR=$FIXTURES scripts/package-ops.sh >"$TEST_TMP/package.log"
 
-PROBE_ROOT=masque-probe-v${VERSION}-linux-x86_64
+PROBE_ROOT=laz-masque-probe-v${VERSION}-linux-x86_64
 install -d "$TEST_TMP/$PROBE_ROOT/bin"
-cat >"$TEST_TMP/$PROBE_ROOT/bin/masque-probe" <<EOF
+cat >"$TEST_TMP/$PROBE_ROOT/bin/laz-masque-probe" <<EOF
 #!/usr/bin/env sh
-echo 'masque-probe $VERSION'
+echo 'laz-masque-probe $VERSION'
 EOF
-chmod 0755 "$TEST_TMP/$PROBE_ROOT/bin/masque-probe"
+chmod 0755 "$TEST_TMP/$PROBE_ROOT/bin/laz-masque-probe"
 tar -C "$TEST_TMP" -czf "$FIXTURES/$PROBE_ROOT.tar.gz" "$PROBE_ROOT"
 (
     cd "$FIXTURES"
@@ -73,6 +73,12 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
+case "$url" in
+    */releases/latest)
+        printf '%s\n' "${FAKE_LATEST_URL:?}"
+        exit 0
+        ;;
+esac
 [ -n "$output" ] && [ -n "$url" ]
 cp -- "$FIXTURES/${url##*/}" "$output"
 EOF
@@ -80,7 +86,7 @@ chmod 0755 "$MOCK_BIN/uname" "$MOCK_BIN/curl"
 
 run_installer() {
     HOME=$TEST_TMP/home \
-        MASQUE_VERSION=$VERSION \
+        MASQUE_VERSION=${TEST_PINNED_VERSION-$VERSION} \
         MASQUE_OPS_SKILLS_DIR=$SKILLS_DIR \
         MASQUE_OPS_BIN_DIR=$BIN_DIR \
         MASQUE_OPS_CONFIG_DIR=$CONFIG_DIR \
@@ -89,15 +95,15 @@ run_installer() {
 }
 
 run_installer >"$TEST_TMP/install.log"
-[ -x "$SKILLS_DIR/masque-ops/scripts/masque-ops.py" ] ||
+[ -x "$SKILLS_DIR/laz-masque-ops/scripts/laz-masque-ops.py" ] ||
     die "the self-contained CLI was not installed with the Skill"
-[ -x "$SKILLS_DIR/masque-ops/scripts/install-latest.sh" ] ||
+[ -x "$SKILLS_DIR/laz-masque-ops/scripts/install-latest.sh" ] ||
     die "the server bootstrap installer was not installed with the Skill"
-[ -L "$BIN_DIR/masque-ops" ] || die "the CLI launcher is not a symbolic link"
-[ -x "$BIN_DIR/masque-probe" ] || die "the release-matched probe was not installed"
-[ "$("$BIN_DIR/masque-ops" --version)" = "masque-ops $VERSION" ] ||
+[ -L "$BIN_DIR/laz-masque-ops" ] || die "the CLI launcher is not a symbolic link"
+[ -x "$BIN_DIR/laz-masque-probe" ] || die "the release-matched probe was not installed"
+[ "$("$BIN_DIR/laz-masque-ops" --version)" = "laz-masque-ops $VERSION" ] ||
     die "the installed CLI reported the wrong version"
-[ "$("$BIN_DIR/masque-probe" --version)" = "masque-probe $VERSION" ] ||
+[ "$("$BIN_DIR/laz-masque-probe" --version)" = "laz-masque-probe $VERSION" ] ||
     die "the installed probe reported the wrong version"
 [ -f "$CONFIG_DIR/fleet.example.toml" ] ||
     die "the private inventory example was not installed"
@@ -107,22 +113,29 @@ run_installer >"$TEST_TMP/install.log"
 
 printf '%s\n' 'private inventory fixture' >"$CONFIG_DIR/fleet.toml"
 printf '%s\n' '# operator note' >>"$CONFIG_DIR/fleet.example.toml"
-printf '%s\n' obsolete >"$SKILLS_DIR/masque-ops/obsolete"
+printf '%s\n' obsolete >"$SKILLS_DIR/laz-masque-ops/obsolete"
 run_installer >"$TEST_TMP/upgrade.log"
 grep -q 'private inventory fixture' "$CONFIG_DIR/fleet.toml" ||
     die "an upgrade changed the private inventory"
 grep -q '# operator note' "$CONFIG_DIR/fleet.example.toml" ||
     die "an upgrade replaced the existing inventory example"
-[ ! -e "$SKILLS_DIR/masque-ops/obsolete" ] ||
+[ ! -e "$SKILLS_DIR/laz-masque-ops/obsolete" ] ||
     die "an upgrade did not replace the old Skill atomically"
 grep -q 'Kept existing inventory example' "$TEST_TMP/upgrade.log" ||
     die "the upgrade did not report that the example was preserved"
 
-printf '%s\n' tampered >>"$FIXTURES/masque-ops-v${VERSION}.tar.gz"
+for plus in '+' '%2B' '%2b'; do
+    encoded=$(printf '%s' "$VERSION" | sed "s/+/$plus/g")
+    export FAKE_LATEST_URL="https://github.com/ro-gri/laz-masque-server/releases/tag/v$encoded"
+    TEST_PINNED_VERSION='' run_installer >"$TEST_TMP/latest.log"
+    [ "$("$BIN_DIR/laz-masque-ops" --version)" = "laz-masque-ops $VERSION" ] || die "latest lost build metadata"
+done
+
+printf '%s\n' tampered >>"$FIXTURES/laz-masque-ops-v${VERSION}.tar.gz"
 if run_installer >"$TEST_TMP/tampered.log" 2>&1; then
     die "a tampered operations archive passed SHA-256 verification"
 fi
-[ "$("$BIN_DIR/masque-ops" --version)" = "masque-ops $VERSION" ] ||
+[ "$("$BIN_DIR/laz-masque-ops" --version)" = "laz-masque-ops $VERSION" ] ||
     die "checksum failure replaced the installed CLI"
 grep -q 'private inventory fixture' "$CONFIG_DIR/fleet.toml" ||
     die "checksum failure changed the private inventory"

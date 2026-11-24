@@ -3,7 +3,7 @@
     {
       "name": "DS_PROMETHEUS",
       "label": "Prometheus",
-      "description": "Prometheus data source scraping masque-server",
+      "description": "Prometheus data source scraping laz-masque-server",
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
@@ -765,8 +765,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "MASQUE Server",
-  "uid": "masque-server",
+  "title": "Laz MASQUE Server",
+  "uid": "laz-masque-server",
   "version": 1,
   "weekStart": ""
 }

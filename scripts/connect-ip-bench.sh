@@ -15,8 +15,8 @@ case "${MASQUE_IP_BENCH_TUN_OFFLOAD:-1}" in
     *) echo 'MASQUE_IP_BENCH_TUN_OFFLOAD must be 0 or 1' >&2; exit 2 ;;
 esac
 bin="${MASQUE_BENCH_BIN_DIR:-target/release}"
-client="${MASQUE_IP_BENCH_CLIENT_BIN:-$bin/masque-e2e}"
-server="$bin/masque-server"
+client="${MASQUE_IP_BENCH_CLIENT_BIN:-$bin/laz-masque-e2e}"
+server="$bin/laz-masque-server"
 if [ ! -x "$client" ] || [ ! -x "$server" ]; then
     echo 'benchmark executables missing' >&2
     exit 2

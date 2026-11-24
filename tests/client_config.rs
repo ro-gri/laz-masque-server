@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn run(args: &[&str], password: &[u8]) -> std::process::Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
         .arg("client-config")
         .args(args)
         .stdin(Stdio::piped())

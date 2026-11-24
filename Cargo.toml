@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "tools/masque-e2e", "tools/masque-probe"]
+members = [".", "tools/laz-masque-e2e", "tools/laz-masque-probe"]
 resolver = "3"
 
 [workspace.lints.rust]
@@ -9,18 +9,18 @@ unsafe_op_in_unsafe_fn = "deny"
 undocumented_unsafe_blocks = "deny"
 
 [package]
-name = "masque-server"
-version = "0.15.0"
+name = "laz-masque-server"
+version = "0.1.0+masque.0.15.0"
 edition = "2024"
 rust-version = "1.88"
 description = "High-performance MASQUE proxy for CONNECT, CONNECT-UDP, and CONNECT-IP over HTTP/2 and HTTP/3"
 license = "MIT"
-repository = "https://github.com/zenith-ent/masque-server"
+repository = "https://github.com/ro-gri/laz-masque-server"
 readme = "README.md"
 keywords = ["masque", "http2", "http3", "quic", "proxy"]
 categories = ["network-programming", "command-line-utilities"]
 publish = false
-default-run = "masque-server"
+default-run = "laz-masque-server"
 
 [lints]
 workspace = true
@@ -29,7 +29,7 @@ workspace = true
 name = "masque"
 
 [[bin]]
-name = "masque-server"
+name = "laz-masque-server"
 path = "src/main.rs"
 
 [dependencies]

@@ -1,5 +1,5 @@
 [package]
-name = "masque-server-fuzz"
+name = "laz-masque-server-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2024"
@@ -9,7 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4.13"
-masque-server = { path = ".." }
+laz-masque-server = { path = ".." }
 
 [[bin]]
 name = "protocol_parsers"

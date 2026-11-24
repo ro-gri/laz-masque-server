@@ -144,7 +144,7 @@ impl Fixture {
     }
 
     fn add_listener(&self, args: &[&str]) -> std::process::Output {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_masque-server"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"));
         command
             .arg("--config")
             .arg(&self.config_path)
@@ -159,7 +159,7 @@ impl Fixture {
         args: &[&str],
         stdin: Option<&[u8]>,
     ) -> std::process::Output {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_masque-server"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"));
         command
             .arg("--config")
             .arg(&self.config_path)
@@ -227,7 +227,7 @@ fn adds_a_certificate_listener_beside_a_basic_one() {
 
     // The edited file is what the server would read, so the preflight it ships
     // with has to agree.
-    let check = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+    let check = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
         .arg("--config")
         .arg(&fixture.config_path)
         .arg("check-config")
@@ -285,7 +285,7 @@ fn refuses_a_quic_datagram_size_on_an_http2_listener() {
 #[test]
 fn adds_a_basic_listener_with_a_password_read_from_stdin() {
     let fixture = Fixture::new(false);
-    let mut child = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
         .arg("--config")
         .arg(&fixture.config_path)
         .arg("add-listener")
@@ -741,7 +741,7 @@ fn writes_a_listener_that_demands_nothing_when_asked() {
     let config = fixture.config();
     assert!(!config.listeners[1].auth.enabled);
 
-    let check = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+    let check = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
         .arg("--config")
         .arg(&fixture.config_path)
         .arg("check-config")
@@ -784,7 +784,7 @@ fn refuses_to_edit_a_file_another_edit_holds() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("another masque-server is editing"),
+        stderr.contains("another laz-masque-server is editing"),
         "unexpected diagnostic: {stderr}"
     );
     fixture.assert_unchanged();
@@ -832,7 +832,7 @@ fn requires_flags_when_standard_input_is_not_a_terminal() {
 fn reports_a_missing_configuration_file_instead_of_creating_one() {
     let dir = TempDir::new();
     let missing = dir.path().join("absent.toml");
-    let output = Command::new(env!("CARGO_BIN_EXE_masque-server"))
+    let output = Command::new(env!("CARGO_BIN_EXE_laz-masque-server"))
         .arg("--config")
         .arg(&missing)
         .arg("add-listener")

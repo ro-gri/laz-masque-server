@@ -33,7 +33,7 @@ rules and [`docs/testing.md`](docs/testing.md) for change-specific validation.
 - Run `scripts/check.sh quick` for a fast formatting and shell syntax check.
   Before submission, run `scripts/check.sh full` and the applicable additional
   checks in the testing matrix. Report checks that could not run and why.
-- For fleet operations use the `masque-ops` Skill and its bundled CLI; source
+- For fleet operations use the `laz-masque-ops` Skill and its bundled CLI; source
   changes do not require that Skill. Follow the privacy rules above in all
   reports and artifacts.
 - For configuration, activation, and deployment tasks, consult

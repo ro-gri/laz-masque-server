@@ -1,6 +1,6 @@
 [Unit]
-Description=MASQUE HTTP/2 and HTTP/3 proxy server
-Documentation=https://github.com/zenith-ent/masque-server
+Description=Laz MASQUE Server — HTTP/2 and HTTP/3 proxy
+Documentation=https://github.com/ro-gri/laz-masque-server
 Wants=network-online.target
 After=network-online.target
 
@@ -13,7 +13,7 @@ NotifyAccess=main
 WatchdogSec=30s
 User=masque
 Group=masque
-ExecStart=/usr/local/bin/masque-server --config /etc/masque/masque.toml
+ExecStart=/usr/local/bin/laz-masque-server --config /etc/masque/masque.toml
 # Re-reads the server certificate/key, Basic accounts and active client roster. Existing
 # connections keep their negotiated TLS state; listeners still need a restart.
 ExecReload=/bin/kill -HUP $MAINPID

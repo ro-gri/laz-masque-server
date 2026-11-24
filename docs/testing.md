@@ -20,7 +20,7 @@ coverage gap; do not claim equivalent coverage from another platform.
 | Packet processing, scheduling, or buffering | `src/net/`, `src/server/mod.rs`, `src/scheduler.rs`, `src/tunnel/`; run `scripts/e2e-test.sh` and relevant benchmarks below, including resource bounds and overload behavior | E2E needs Docker, TUN and `NET_ADMIN`; benchmarks are potentially long and need controlled conditions |
 | Configuration and defaults | `src/config.rs`, `src/server/validation.rs`, `deploy/config/`; run `cargo test --test check_config` and, for editing, `cargo test --test add_listener`; verify old configurations and update examples | Native Rust build; local tests |
 | Linux network fast paths or TUN | `src/net/`, `src/tun.rs`; run applicable Linux-specific checks below and `scripts/e2e-test.sh`; also validate the portable fallback | Linux and potentially privileged Docker/TUN access; macOS does not cover these paths |
-| Operations CLI or installer | `scripts/masque-ops.py`, `.agents/skills/masque-ops/`, installer scripts; run `python3 -m unittest -v tests/test_masque_ops.py` and relevant installer tests; check packaged Skill copies stay synchronized | Python 3 and shell; no live fleet needed |
+| Operations CLI or installer | `scripts/laz-masque-ops.py`, `.agents/skills/laz-masque-ops/`, installer scripts; run `python3 -m unittest -v tests/test_masque_ops.py` and relevant installer tests; check packaged Skill copies stay synchronized | Python 3 and shell; no live fleet needed |
 | Protocol framing | `src/capsule/`, `src/datagram.rs`, H2/H3 request paths; run relevant integration tests and bounded parser fuzzing below | Native Rust build; fuzzing needs nightly and `cargo-fuzz` |
 
 CI runs `quality` on Linux, `msrv` separately, and `test` on Linux and macOS.
@@ -43,7 +43,7 @@ the exact environment and commands.
 | Client interop | `cargo test --test client_cert_connect_ip` | TLS certificate authentication, CONNECT-IP setup, mixed authentication, and live HTTP/3 TLS reload/rollback |
 | HTTP/2 interop | `cargo test --test http2_connect` | Real TLS/H2 CONNECT variants, multiple Basic accounts, both authentication modes, and credential/TLS reload rollback without dropping an established connection |
 | ECH | `cargo test --test http2_connect --test client_cert_connect_ip ech_` | Verified ECH and CONNECT-IP setup on both transports, previous keys and client certificates on HTTP/3, plain TLS on HTTP/2, and invalid configuration rejection |
-| End-user probe | `cargo test -p masque-probe` | Basic/certificate authentication over H2/H3 with live TCP payload and CONNECT-UDP echo round trips, explicit CONNECT-IP setup-only and forwarding-failure checks, and stable result/error handling on Linux and macOS |
+| End-user probe | `cargo test -p laz-masque-probe` | Basic/certificate authentication over H2/H3 with live TCP payload and CONNECT-UDP echo round trips, explicit CONNECT-IP setup-only and forwarding-failure checks, and stable result/error handling on Linux and macOS |
 | Observability assets | `cargo test --test monitoring_assets` | Prometheus metric references and importable Grafana JSON |
 | Service shutdown | `tests/systemd-shutdown.sh` | Real SIGTERM/SIGINT handling and every-shard drain; Linux exercises two shards |
 | Config and host diagnostics | `cargo test --test check_config` | `check-config` accepts what a server accepts; `doctor` remains read-only; support bundles omit credential/identity sentinels |
@@ -57,12 +57,20 @@ the exact environment and commands.
 
 ## Release verification and promotion
 
+Release tags use `v<laz-version>+masque.<upstream-version>`, such as
+`v0.1.0+masque.0.15.0`. Keep the full version, including build metadata, in
+all workspace package manifests, lockfiles, the operations Skill `VERSION`,
+and the dated changelog heading. Binaries and archive names retain that full
+version. Update ordering uses the Laz version and prerelease identifiers;
+build metadata does not change precedence. Increase the Laz version for each
+release, including an upstream-base update.
+
 Before tagging, validate the new version with `scripts/validate-release.sh`
 and run both the ordinary CI and manually dispatched scheduled verification
 on the candidate commit. The latter explicitly runs the otherwise ignored
 Linux resource-pressure test, ASan, Docker TUN forwarding, and parser fuzzing.
 An already cross-compiled pressure test can use
-`MASQUE_RESOURCE_SERVER_BIN=/absolute/path/to/masque-server` to launch the
+`MASQUE_RESOURCE_SERVER_BIN=/absolute/path/to/laz-masque-server` to launch the
 matching server executable after transfer to a disposable Linux environment.
 
 The release workflow publishes every tag as a GitHub prerelease initially,
@@ -70,8 +78,8 @@ including tags without a SemVer prerelease suffix. Automatic installers stay
 on the previous stable release while the exact, checksummed candidate is
 verified through the operations CLI on one host. Verify the external probe,
 configuration preservation, bounded resources, and rollback before promotion.
-For a stable tag such as `v0.14.0`, promote those same artifacts only after
-verification with `gh release edit v0.14.0 --prerelease=false --latest`.
+For a stable tag such as `v0.1.0+masque.0.15.0`, promote those same artifacts only after
+verification with `gh release edit v0.1.0+masque.0.15.0 --prerelease=false --latest`.
 SemVer prerelease tags must retain their prerelease status.
 
 ## Local tests
@@ -191,12 +199,12 @@ CONNECT connection. Choose an origin that serves a large file with a
 `200 OK` response and `Content-Length`.
 
 ```sh
-cargo build --release --locked -p masque-e2e
+cargo build --release --locked -p laz-masque-e2e
 MASQUE_SERVER_ADDR=192.0.2.10:443 \
 MASQUE_SERVER_NAME=proxy.example.com \
 MASQUE_BENCH_CA_CERT=/path/to/ca-bundle.pem \
 MASQUE_HTTPS_URL=https://download.example.com/large.bin \
-target/release/masque-e2e
+target/release/laz-masque-e2e
 ```
 
 Use a PEM trust bundle for both the proxy and the origin. For Basic
@@ -385,7 +393,7 @@ replaces its UDP socket when `MASQUE_MIGRATION_CHECK=1`. Add
 Packet forwarding requires a Linux TUN device. Use `scripts/e2e-test.sh`
 or the standalone `tests/connect-ip-policy.sh` test in a disposable Linux
 environment. They exercise forwarding in addition to handshake and address
-assignment. To verify a configured peer path, run `masque-probe` with
+assignment. To verify a configured peer path, run `laz-masque-probe` with
 `--connect-ip` and an inner UDP target that can return DNS or echo traffic.
 Select the transport explicitly when validating both HTTP/2 and HTTP/3.
 
@@ -441,9 +449,9 @@ that, and all three were hit while qualifying this feature:
   the same matrix used by CI.
 - Extract the archive into a temporary directory and inspect permissions and
   paths.
-- Verify `masque-server --help`, `hash-password`, `client-config`,
+- Verify `laz-masque-server --help`, `hash-password`, `client-config`,
   side-effect-free `check-config`, read-only `doctor`, `support-bundle`, and
-  `masque-probe --help` from the packaged binaries.
+  `laz-masque-probe --help` from the packaged binaries.
 - Install on a disposable Linux host and run a client smoke test.
 - Tag only the commit that passed these checks.
 

@@ -7,6 +7,11 @@ pre-1.0.
 
 ## Unreleased
 
+## 0.1.0+masque.0.15.0 - 2026-11-25
+
+First Laz MASQUE Server release, based on upstream 0.15.0 at `3295c86`.
+Laz version numbers are independent of upstream.
+
 ### Breaking
 
 - Require a typed, non-nil UUID `id` for active Basic and certificate credentials.
@@ -14,6 +19,11 @@ pre-1.0.
   commands generate UUIDs or accept `--id`; password edits preserve identity.
 
 ### Changed
+
+- Rename the server, probe, operations tools, systemd service and release
+  archives to the Laz MASQUE names. Installers and update tooling use
+  `ro-gri/laz-masque-server`. Preserve configuration paths and `MASQUE_*`
+  environment variables; migration from the upstream service is manual.
 
 - Size SOCKS5 UDP receive buffers by the configured upstream packet limit on
   H2 and H3, preserving truncation detection and portable single-packet reads.
@@ -23,7 +33,6 @@ pre-1.0.
 - Add `POST /kickAuth` on the local accounting API to disconnect a credential
   UUID across H2/H3 and invalidate its authorization cache, with independent
   best-effort steps and a generic result. Preserve cumulative traffic counters.
-
 
 - Add optional loopback `GET /stats` accounting with a startup instance UUID,
   cumulative payload RX/TX and online credential UUIDs across H2/H3 and all
@@ -47,6 +56,11 @@ pre-1.0.
 - Add upstream authentication, UDP association and packet-size limits,
   restart-required tracking for external CIDR/password files, outbound
   metrics, and SOCKS5 integration tests for both HTTP transports.
+
+## Upstream history
+
+The following entries are preserved from zenith-ent/masque-server. Their
+version numbers and product names refer to upstream, not Laz MASQUE Server.
 
 ## 0.15.0 - 2026-11-20
 

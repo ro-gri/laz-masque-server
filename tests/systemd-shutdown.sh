@@ -17,18 +17,18 @@ case "$(uname -s)" in
     *) die "unsupported test platform" ;;
 esac
 
-CANDIDATE=${MASQUE_TEST_BIN:-target/debug/masque-server}
+CANDIDATE=${MASQUE_TEST_BIN:-target/debug/laz-masque-server}
 [ -x "$CANDIDATE" ] || die "MASQUE_TEST_BIN must name an executable"
 
-grep -q '^KillSignal=SIGTERM$' deploy/systemd/masque.service ||
+grep -q '^KillSignal=SIGTERM$' deploy/systemd/laz-masque.service ||
     die "the systemd unit does not send SIGTERM"
-grep -q '^TimeoutStopSec=10s$' deploy/systemd/masque.service ||
+grep -q '^TimeoutStopSec=10s$' deploy/systemd/laz-masque.service ||
     die "the systemd unit does not leave time for the bounded drain"
-grep -q '^Type=notify$' deploy/systemd/masque.service ||
+grep -q '^Type=notify$' deploy/systemd/laz-masque.service ||
     die "the systemd unit does not wait for application readiness"
-grep -q '^NotifyAccess=main$' deploy/systemd/masque.service ||
+grep -q '^NotifyAccess=main$' deploy/systemd/laz-masque.service ||
     die "the systemd unit accepts readiness from more than the main process"
-grep -q '^WatchdogSec=30s$' deploy/systemd/masque.service ||
+grep -q '^WatchdogSec=30s$' deploy/systemd/laz-masque.service ||
     die "the systemd unit does not supervise proxy-shard liveness"
 
 TEST_TMP=$(mktemp -d /tmp/masque-systemd-shutdown.XXXXXX)

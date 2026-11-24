@@ -1,5 +1,5 @@
 groups:
-  - name: masque-server
+  - name: laz-masque-server
     rules:
       - alert: MasqueServerNotReady
         expr: masque_server_ready == 0

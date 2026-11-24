@@ -15,9 +15,9 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
-SKILL_ROOT = ROOT / ".agents" / "skills" / "masque-ops"
-SCRIPT = SKILL_ROOT / "scripts" / "masque-ops.py"
-REPOSITORY_LAUNCHER = ROOT / "scripts" / "masque-ops.py"
+SKILL_ROOT = ROOT / ".agents" / "skills" / "laz-masque-ops"
+SCRIPT = SKILL_ROOT / "scripts" / "laz-masque-ops.py"
+REPOSITORY_LAUNCHER = ROOT / "scripts" / "laz-masque-ops.py"
 PACKAGE_VERSION = tomllib.loads((ROOT / "Cargo.toml").read_text())["package"]["version"]
 SPEC = importlib.util.spec_from_file_location("masque_ops", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
@@ -28,7 +28,7 @@ SPEC.loader.exec_module(ops)
 
 def release(tag: str) -> object:
     version = tag.removeprefix("v")
-    archive = f"masque-v{version}-linux-x86_64.tar.gz"
+    archive = f"laz-masque-server-v{version}-linux-x86_64.tar.gz"
     return ops.Release(
         tag=tag,
         prerelease="-" in tag,
@@ -79,7 +79,7 @@ class FakeSsh:
             output = "\n".join(
                 [
                     "masque_ops_status=1",
-                    f"version=masque-server {self.version.removeprefix('v')}",
+                    f"version=laz-masque-server {self.version.removeprefix('v')}",
                     "arch=x86_64",
                     f"service_active={active}",
                     "service_enabled=enabled",
@@ -138,7 +138,7 @@ class FakeBootstrapSsh:
             output = "\n".join(
                 [
                     "masque_ops_status=1",
-                    "version=masque-server 0.13.0",
+                    "version=laz-masque-server 0.13.0",
                     "arch=x86_64",
                     "service_active=active",
                     "service_enabled=enabled",
@@ -247,7 +247,7 @@ class InventoryTests(unittest.TestCase):
             "\n".join(
                 [
                     "schema_version = 1",
-                    'repository = "zenith-ent/masque-server"',
+                    'repository = "ro-gri/laz-masque-server"',
                     f'state_path = "{self.root / "state.json"}"',
                     "[defaults]",
                     'user = "root"',
@@ -276,15 +276,16 @@ class InventoryTests(unittest.TestCase):
         with self.assertRaisesRegex(ops.OpsError, "group or others"):
             ops.load_inventory(inventory.path)
 
-    def test_legacy_repository_is_normalized_without_rewriting_inventory(self) -> None:
+    def test_upstream_repository_requires_explicit_fork_migration(self) -> None:
         path = self.write_inventory()
-        legacy = path.read_text(encoding="utf-8").replace(
-            ops.DEFAULT_REPOSITORY, ops.LEGACY_REPOSITORY
-        )
-        path.write_text(legacy, encoding="utf-8")
-
-        self.assertEqual(ops.load_inventory(path).repository, ops.DEFAULT_REPOSITORY)
-        self.assertEqual(path.read_text(encoding="utf-8"), legacy)
+        original = path.read_text(encoding="utf-8")
+        for repository in ("zenith-ent/masque-server", "Vincent-bin/masque-server", "ro-gri/masque-server"):
+            with self.subTest(repository=repository):
+                legacy = original.replace(ops.DEFAULT_REPOSITORY, repository)
+                path.write_text(legacy, encoding="utf-8")
+                with self.assertRaisesRegex(ops.OpsError, "release source"):
+                    ops.load_inventory(path)
+                self.assertEqual(path.read_text(encoding="utf-8"), legacy)
 
     def test_required_profiles_support_legacy_and_explicit_transports(self) -> None:
         path = self.write_inventory(
@@ -481,7 +482,7 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(host.probe.ca_cert, host.bootstrap.tls_ca_file)
         self.assertFalse(host.bootstrap.tls_ca_file.exists())
         self.assertIn(host.probe.ca_cert, ops.FleetOperator._bootstrap_missing_probe_credentials(host))
-        probe = self.root / "masque-probe"
+        probe = self.root / "laz-masque-probe"
         probe.write_text("#!/bin/sh\nexit 0\n")
         probe.chmod(0o700)
         with mock.patch.dict(ops.os.environ, {"PATH": str(self.root) + ":" + ops.os.environ.get("PATH", "")}), \
@@ -601,8 +602,8 @@ class InventoryTests(unittest.TestCase):
     def test_release_source_is_pinned_to_the_official_repository(self) -> None:
         path = self.write_inventory()
         contents = path.read_text(encoding="utf-8").replace(
-            'repository = "zenith-ent/masque-server"',
-            'repository = "example/masque-server"',
+            'repository = "ro-gri/laz-masque-server"',
+            'repository = "example/laz-masque-server"',
         )
         path.write_text(contents, encoding="utf-8")
         with self.assertRaisesRegex(ops.OpsError, "release source"):
@@ -702,11 +703,11 @@ class InventoryTests(unittest.TestCase):
     def test_ip_probe_requires_packet_evidence_and_forwards_payload_options(self) -> None:
         path = self.write_inventory('[hosts.probe]\nendpoint = "proxy.example:443"\nconnect_ip = true\ntcp_mode = "echo"\nip_target = "198.51.100.1:9999"\nip_mode = "echo"')
         host = ops.load_inventory(path).hosts[0]
-        runner = ops.ProbeRunner("masque-probe", self.root)
+        runner = ops.ProbeRunner("laz-masque-probe", self.root)
         for code, verified in [("CONNECT_IP_READY", False), ("CONNECT_IP_SETUP_ONLY", False), ("CONNECT_IP_ROUND_TRIP", True)]:
             report = {"success": True, "selected_transport": "http3", "checks": [{"name": "connect_ip", "status": "pass", "code": code}]}
             completed = subprocess.CompletedProcess([], 0, json.dumps(report).encode(), b"")
-            with mock.patch.object(runner, "preflight"), mock.patch.object(runner, "resolve_binary", return_value="masque-probe"), mock.patch.object(ops.subprocess, "run", return_value=completed) as run:
+            with mock.patch.object(runner, "preflight"), mock.patch.object(runner, "resolve_binary", return_value="laz-masque-probe"), mock.patch.object(ops.subprocess, "run", return_value=completed) as run:
                 if verified:
                     self.assertTrue(runner.run(host)["connect_ip_forwarding_verified"])
                 else:
@@ -820,6 +821,19 @@ class InventoryTests(unittest.TestCase):
         )
         self.assertLess(ops.version_order("v1.2.3-rc.10"), ops.version_order("v1.2.3"))
 
+    def test_release_build_metadata_is_preserved_but_not_ordered(self) -> None:
+        tag = "v0.1.0+masque.0.15.0"
+        self.assertEqual(ops.normalize_version(tag[1:]), tag)
+        self.assertEqual(ops.installed_version("laz-masque-server " + tag[1:]), tag)
+        self.assertEqual(ops.version_order(tag), ops.version_order("v0.1.0"))
+        self.assertEqual(ops.version_order(tag), ops.version_order("v0.1.0+masque.9.0.0"))
+        self.assertLess(ops.version_order(tag), ops.version_order("v0.1.1+masque.0.1.0"))
+        self.assertLess(ops.version_order("v0.1.0-rc.1+masque.0.15.0"), ops.version_order(tag))
+        for invalid in ("v0.1.0+", "v0.1.0+masque..1", "v0.1.0+a/b", "v0.1.0+a+b"):
+            with self.subTest(invalid=invalid), self.assertRaises(ops.OpsError):
+                ops.normalize_version(invalid)
+            self.assertIsNone(ops.installed_version("laz-masque-server " + invalid[1:]))
+
 
 class OperationTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -900,8 +914,8 @@ class OperationTests(unittest.TestCase):
         inventory = ops.load_inventory(path)
         operator = ops.FleetOperator(inventory, ssh=FakeEmptyBootstrapSsh())
         operator.probes = mock.Mock()
-        old = ops.plan_bootstrap(operator, inventory.hosts[0], release("v0.14.3"))
-        new = ops.plan_bootstrap(operator, inventory.hosts[0], release("v0.14.4"))
+        old = ops.plan_bootstrap(operator, inventory.hosts[0], release("v0.0.9"))
+        new = ops.plan_bootstrap(operator, inventory.hosts[0], release("v0.1.0"))
         self.assertFalse(old["ready"])
         self.assertTrue(any("HTTP/2 bootstrap" in x for x in old["blockers"]))
         self.assertTrue(new["ready"])
@@ -1401,16 +1415,16 @@ class SecurityTests(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as temporary:
-            isolated = Path(temporary) / "masque-ops"
+            isolated = Path(temporary) / "laz-masque-ops"
             shutil.copytree(SKILL_ROOT, isolated)
             completed = subprocess.run(
-                [str(isolated / "scripts/masque-ops.py"), "--version"],
+                [str(isolated / "scripts/laz-masque-ops.py"), "--version"],
                 text=True,
                 capture_output=True,
                 check=False,
             )
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(completed.stdout.strip(), f"masque-ops {PACKAGE_VERSION}")
+        self.assertEqual(completed.stdout.strip(), f"laz-masque-ops {PACKAGE_VERSION}")
 
     def test_repository_launcher_uses_the_bundled_cli(self) -> None:
         completed = subprocess.run(
@@ -1420,7 +1434,7 @@ class SecurityTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(completed.stdout.strip(), f"masque-ops {PACKAGE_VERSION}")
+        self.assertEqual(completed.stdout.strip(), f"laz-masque-ops {PACKAGE_VERSION}")
 
     @unittest.skipUnless(shutil.which("sh"), "POSIX shell is required")
     def test_embedded_remote_scripts_have_valid_shell_syntax(self) -> None:
@@ -1475,11 +1489,11 @@ class SecurityTests(unittest.TestCase):
             identity_file=None,
             known_hosts_file=None,
             use_sudo=False,
-            service="masque.service",
+            service="laz-masque.service",
             config_path="/etc/masque/masque.toml",
-            binary_path="/usr/local/bin/masque-server",
+            binary_path="/usr/local/bin/laz-masque-server",
             cert_path="/etc/masque/certs/server.crt",
-            maintenance_path="/usr/local/sbin/masque-maintain",
+            maintenance_path="/usr/local/sbin/laz-masque-maintain",
             connect_timeout_secs=10,
             command_timeout_secs=60,
             deploy_timeout_secs=900,

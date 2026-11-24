@@ -1,10 +1,10 @@
-# Copy this example to ~/.config/masque-server/fleet.toml, replace every
+# Copy this example to ~/.config/laz-masque-server/fleet.toml, replace every
 # documentation value, and chmod the file and each referenced private file to
 # 0600.
 schema_version = 1
-repository = "zenith-ent/masque-server"
-state_path = "~/.local/state/masque-server/ops-state.json"
-probe_binary = "masque-probe"
+repository = "ro-gri/laz-masque-server"
+state_path = "~/.local/state/laz-masque-server/ops-state.json"
+probe_binary = "laz-masque-probe"
 
 [defaults]
 user = "masque-deploy"
@@ -49,7 +49,7 @@ basic_client_config = "secrets/edge-a.basic.json"
 # cert_listen_port = 4443
 
 # This optional probe runs on the administration machine after installation.
-# Password contents are read directly by masque-probe, never by masque-ops and
+# Password contents are read directly by laz-masque-probe, never by laz-masque-ops and
 # never from a command-line argument.
 [hosts.probe]
 endpoint = "proxy-a.example.com:8449"

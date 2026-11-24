@@ -8,34 +8,34 @@ PACKAGE_VERSION=$(awk '
     /^\[/ { in_package=0 }
     in_package && /^version = / { gsub(/[" ]/, "", $3); print $3; exit }
 ' Cargo.toml)
-OPS_VERSION=$(awk 'NF { print $1; exit }' .agents/skills/masque-ops/VERSION)
+OPS_VERSION=$(awk 'NF { print $1; exit }' .agents/skills/laz-masque-ops/VERSION)
 if [ -z "$PACKAGE_VERSION" ] || [ "$PACKAGE_VERSION" != "$OPS_VERSION" ]; then
-    echo "error: masque-server and masque-ops versions must match" >&2
+    echo "error: laz-masque-server and laz-masque-ops versions must match" >&2
     exit 1
 fi
 
 VERSION="${VERSION:-$OPS_VERSION}"
 if [ "$VERSION" != "$OPS_VERSION" ]; then
-    echo "error: VERSION=$VERSION does not match masque-ops $OPS_VERSION" >&2
+    echo "error: VERSION=$VERSION does not match laz-masque-ops $OPS_VERSION" >&2
     exit 1
 fi
 
-cmp install-latest.sh .agents/skills/masque-ops/scripts/install-latest.sh
-cmp install-probe.sh .agents/skills/masque-ops/scripts/install-probe.sh
+cmp install-latest.sh .agents/skills/laz-masque-ops/scripts/install-latest.sh
+cmp install-probe.sh .agents/skills/laz-masque-ops/scripts/install-probe.sh
 cmp deploy/config/fleet.example.toml \
-    .agents/skills/masque-ops/assets/fleet.example.toml
+    .agents/skills/laz-masque-ops/assets/fleet.example.toml
 
 OUTPUT_DIR="${OUTPUT_DIR:-dist}"
-ARCHIVE_NAME="masque-ops-v${VERSION}"
-STAGING_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/masque-ops-package.XXXXXX")
+ARCHIVE_NAME="laz-masque-ops-v${VERSION}"
+STAGING_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/laz-masque-ops-package.XXXXXX")
 
 cleanup() {
     rm -rf -- "$STAGING_ROOT"
 }
 trap cleanup EXIT INT TERM
 
-SKILL_SOURCE=.agents/skills/masque-ops
-SKILL_DESTINATION=$STAGING_ROOT/$ARCHIVE_NAME/skills/masque-ops
+SKILL_SOURCE=.agents/skills/laz-masque-ops
+SKILL_DESTINATION=$STAGING_ROOT/$ARCHIVE_NAME/skills/laz-masque-ops
 install -d \
     "$SKILL_DESTINATION/agents" \
     "$SKILL_DESTINATION/assets" \
@@ -51,13 +51,14 @@ install -m 0644 "$SKILL_SOURCE/references/inventory.md" \
     "$SKILL_DESTINATION/references/inventory.md"
 install -m 0644 "$SKILL_SOURCE/references/runbooks.md" \
     "$SKILL_DESTINATION/references/runbooks.md"
-install -m 0755 "$SKILL_SOURCE/scripts/masque-ops.py" \
-    "$SKILL_DESTINATION/scripts/masque-ops.py"
+install -m 0755 "$SKILL_SOURCE/scripts/laz-masque-ops.py" \
+    "$SKILL_DESTINATION/scripts/laz-masque-ops.py"
 install -m 0755 "$SKILL_SOURCE/scripts/install-latest.sh" \
     "$SKILL_DESTINATION/scripts/install-latest.sh"
 install -m 0755 "$SKILL_SOURCE/scripts/install-probe.sh" \
     "$SKILL_DESTINATION/scripts/install-probe.sh"
 install -m 0644 README.md "$STAGING_ROOT/$ARCHIVE_NAME/README.md"
+install -m 0644 README.ru.md "$STAGING_ROOT/$ARCHIVE_NAME/README.ru.md"
 install -m 0644 LICENSE "$STAGING_ROOT/$ARCHIVE_NAME/LICENSE"
 
 mkdir -p "$OUTPUT_DIR"

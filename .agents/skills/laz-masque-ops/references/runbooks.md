@@ -1,11 +1,11 @@
 # Fleet operation runbooks
 
-Resolve `OPS_CLI` to `scripts/masque-ops.py` inside the directory containing
+Resolve `OPS_CLI` to `scripts/laz-masque-ops.py` inside the directory containing
 this Skill, then set the private inventory path once for the examples:
 
 ```sh
-inventory="$HOME/.config/masque-server/fleet.toml"
-OPS_CLI="/absolute/path/to/masque-ops/scripts/masque-ops.py"
+inventory="$HOME/.config/laz-masque-server/fleet.toml"
+OPS_CLI="/absolute/path/to/laz-masque-ops/scripts/laz-masque-ops.py"
 ```
 
 Place global options before the subcommand. Add `--json` when machine-readable
@@ -34,7 +34,7 @@ Run and inspect `plan` first, then execute only after explicit authorization:
   deploy edge-a --version vX.Y.Z --apply
 ```
 
-For a pre-operations release that does not yet contain `masque-maintain`, use
+For a pre-operations release that does not yet contain `laz-masque-maintain`, use
 the one-time root-only bootstrap after the operator approves it:
 
 ```sh

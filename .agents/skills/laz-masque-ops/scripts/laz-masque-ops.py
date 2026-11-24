@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Safe, deterministic fleet operations for masque-server.
+"""Safe, deterministic fleet operations for laz-masque-server.
 
 The script deliberately keeps inventory and credentials outside its own files.
 Mutating commands require both an exact release tag and an explicit --apply.
@@ -46,7 +46,7 @@ INSTALLER_PATH = SKILL_ROOT / "scripts" / "install-latest.sh"
 def protected_source_root() -> Path:
     """Return the checkout root, or the installed Skill root outside a checkout."""
     for candidate in SCRIPT_PATH.parents:
-        checkout_skill = candidate / ".agents" / "skills" / "masque-ops"
+        checkout_skill = candidate / ".agents" / "skills" / "laz-masque-ops"
         if (
             (candidate / ".git").exists()
             and (candidate / "Cargo.toml").is_file()
@@ -60,30 +60,30 @@ PROTECTED_SOURCE_ROOT = protected_source_root()
 DEFAULT_INVENTORY = Path(
     os.environ.get(
         "MASQUE_OPS_INVENTORY",
-        str(Path.home() / ".config" / "masque-server" / "fleet.toml"),
+        str(Path.home() / ".config" / "laz-masque-server" / "fleet.toml"),
     )
 ).expanduser()
-DEFAULT_STATE = Path.home() / ".local" / "state" / "masque-server" / "ops-state.json"
-DEFAULT_REPOSITORY = "zenith-ent/masque-server"
-LEGACY_REPOSITORY = "Vincent-bin/masque-server"
+DEFAULT_STATE = Path.home() / ".local" / "state" / "laz-masque-server" / "ops-state.json"
+DEFAULT_REPOSITORY = "ro-gri/laz-masque-server"
 VERSION_RE = re.compile(
     r"^v(?P<major>0|[1-9][0-9]*)\."
     r"(?P<minor>0|[1-9][0-9]*)\."
     r"(?P<patch>0|[1-9][0-9]*)"
     r"(?P<prerelease>-(?:"
     r"0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*"
-    r")(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$"
+    r")(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 USER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
 AUTH_USER_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-REMOTE_SERVICE = "masque.service"
+REMOTE_SERVICE = "laz-masque.service"
 REMOTE_CONFIG = "/etc/masque/masque.toml"
-REMOTE_BINARY = "/usr/local/bin/masque-server"
+REMOTE_BINARY = "/usr/local/bin/laz-masque-server"
 REMOTE_CERT = "/etc/masque/certs/server.crt"
-REMOTE_MAINTENANCE = "/usr/local/sbin/masque-maintain"
+REMOTE_MAINTENANCE = "/usr/local/sbin/laz-masque-maintain"
 
 
 class OpsError(RuntimeError):
@@ -286,7 +286,7 @@ def installed_version(value: str | None) -> str | None:
     if not value:
         return None
     match = re.search(
-        r"(?<![0-9A-Za-z])([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?)",
+        r"(?<![0-9A-Za-z])([0-9]+\.[0-9]+\.[0-9]+\S*)",
         value,
     )
     if not match:
@@ -1105,9 +1105,7 @@ def load_inventory(path: Path) -> Inventory:
     repository = require_string(raw.get("repository", DEFAULT_REPOSITORY), "repository")
     if not REPOSITORY_RE.fullmatch(repository):
         raise OpsError("repository must be in owner/name form")
-    if repository == LEGACY_REPOSITORY:
-        repository = DEFAULT_REPOSITORY
-    elif repository != DEFAULT_REPOSITORY:
+    if repository != DEFAULT_REPOSITORY:
         raise OpsError(
             f"repository must be {DEFAULT_REPOSITORY}; the remote maintenance "
             "entrypoint is pinned to that release source"
@@ -1118,7 +1116,7 @@ def load_inventory(path: Path) -> Inventory:
     )
     state_path = resolve_local_path(state_path_value, inventory_dir)
     probe_binary = require_string(
-        raw.get("probe_binary", "masque-probe"), "probe_binary"
+        raw.get("probe_binary", "laz-masque-probe"), "probe_binary"
     )
     defaults = require_mapping(raw.get("defaults", {}), "defaults")
     reject_unknown(defaults, CONNECTION_KEYS, "defaults")
@@ -1353,7 +1351,7 @@ class SshClient:
             environment.update({
                 "SSH_ASKPASS": str(helper),
                 "SSH_ASKPASS_REQUIRE": "force",
-                "DISPLAY": environment.get("DISPLAY") or ":masque-ops",
+                "DISPLAY": environment.get("DISPLAY") or ":laz-masque-ops",
                 "MASQUE_OPS_SSH_PASSWORD_FILE": str(host.ssh_password_file),
             })
             yield environment
@@ -1591,7 +1589,7 @@ complete=1
 PREPARE_DEPENDENCIES_SCRIPT = r"""# MASQUE_OPS_PREPARE_DEPENDENCIES_V1
 set -eu
 [ "$(id -u)" -eq 0 ]
-[ ! -e /usr/local/bin/masque-server ] && [ ! -e /etc/masque/masque.toml ]
+[ ! -e /usr/local/bin/laz-masque-server ] && [ ! -e /etc/masque/masque.toml ]
 case "$1" in
     apt)
         export DEBIAN_FRONTEND=noninteractive
@@ -1747,7 +1745,7 @@ class Release:
         if mapped is None:
             raise OpsError(f"unsupported remote architecture: {architecture}")
         version = self.tag.removeprefix("v")
-        archive = f"masque-v{version}-linux-{mapped}.tar.gz"
+        archive = f"laz-masque-server-v{version}-linux-{mapped}.tar.gz"
         return archive, f"{archive}.sha256"
 
     def supports(self, architecture: str) -> bool:
@@ -1772,7 +1770,7 @@ class ReleaseClient:
         url = f"https://api.github.com/repos/{self.repository}/releases/{suffix}"
         headers = {
             "Accept": "application/vnd.github+json",
-            "User-Agent": "masque-ops/1",
+            "User-Agent": "laz-masque-ops/1",
             "X-GitHub-Api-Version": "2022-11-28",
         }
         token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
@@ -1826,16 +1824,16 @@ class ProbeRunner:
         if "/" in configured:
             candidate = resolve_local_path(configured, self.inventory_dir)
             if not candidate.is_file() or not os.access(candidate, os.X_OK):
-                raise OpsError(f"masque-probe is not executable: {candidate}")
+                raise OpsError(f"laz-masque-probe is not executable: {candidate}")
             return str(candidate)
         resolved = shutil.which(configured)
-        if resolved is None and configured == "masque-probe":
+        if resolved is None and configured == "laz-masque-probe":
             local_candidate = Path.home() / ".local" / "bin" / configured
             if local_candidate.is_file() and os.access(local_candidate, os.X_OK):
                 resolved = str(local_candidate)
         if resolved is None:
             raise OpsError(
-                "masque-probe was not found; run the Skill's bundled "
+                "laz-masque-probe was not found; run the Skill's bundled "
                 "scripts/install-probe.sh or set probe_binary"
             )
         return resolved
@@ -1929,7 +1927,7 @@ class ProbeRunner:
             ) from error
         except OSError as error:
             raise OpsError(
-                f"could not start masque-probe for {host.name}: {error}"
+                f"could not start laz-masque-probe for {host.name}: {error}"
             ) from error
         finally:
             if password_handle is not None:
@@ -1938,13 +1936,13 @@ class ProbeRunner:
             report = json.loads(completed.stdout.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise OpsError(
-                f"masque-probe returned invalid JSON for {host.name}"
+                f"laz-masque-probe returned invalid JSON for {host.name}"
             ) from error
         if not isinstance(report, dict):
-            raise OpsError(f"masque-probe returned invalid JSON for {host.name}")
+            raise OpsError(f"laz-masque-probe returned invalid JSON for {host.name}")
         checks = report.get("checks", [])
         if not isinstance(checks, list) or type(report.get("success")) is not bool:
-            raise OpsError(f"masque-probe returned invalid JSON for {host.name}")
+            raise OpsError(f"laz-masque-probe returned invalid JSON for {host.name}")
         failed_codes = [
             check.get("code", "UNKNOWN")
             for check in checks
@@ -1967,7 +1965,7 @@ class ProbeRunner:
         if probe.transport != "auto" and summary["transport"] != probe.transport:
             raise OpsError("external MASQUE probe did not verify the required transport")
         if probe.connect_ip and not probe.ip_setup_only and not summary["connect_ip_forwarding_verified"]:
-            raise OpsError("CONNECT-IP forwarding was not verified; upgrade masque-probe or explicitly select ip_setup_only")
+            raise OpsError("CONNECT-IP forwarding was not verified; upgrade laz-masque-probe or explicitly select ip_setup_only")
         return summary
 
 
@@ -2447,12 +2445,12 @@ class FleetOperator:
 
         token = secrets.token_hex(16)
         remote_basic_config = (
-            f"/root/.masque-ops-{token}.basic.json"
+            f"/root/.laz-masque-ops-{token}.basic.json"
             if bootstrap.basic_client_config is not None
             else None
         )
         remote_client_config = (
-            f"/root/.masque-ops-{token}.client.json"
+            f"/root/.laz-masque-ops-{token}.client.json"
             if bootstrap.client_config is not None
             else None
         )
@@ -2992,8 +2990,8 @@ def plan_bootstrap(
         blockers.append("bootstrap settings are not configured")
     elif host.bootstrap.transport == "http2":
         version = VERSION_RE.fullmatch(release.tag)
-        if version is None or tuple(int(version.group(part)) for part in ("major", "minor", "patch")) < (0, 14, 4):
-            blockers.append("HTTP/2 bootstrap requires a release containing transport-aware installation (v0.14.4 or newer)")
+        if version is None or tuple(int(version.group(part)) for part in ("major", "minor", "patch")) < (0, 1, 0):
+            blockers.append("HTTP/2 bootstrap requires Laz MASQUE Server v0.1.0 or newer")
     if host.user != "root" or host.use_sudo:
         blockers.append("fresh bootstrap requires an explicit root SSH inventory entry")
     try:
@@ -3162,8 +3160,8 @@ def emit(payload: object, json_output: bool) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="masque-ops",
-        description="Inspect and safely operate a masque-server fleet over SSH",
+        prog="laz-masque-ops",
+        description="Inspect and safely operate a laz-masque-server fleet over SSH",
     )
     parser.add_argument(
         "--version", action="version", version=f"%(prog)s {load_ops_version()}"
@@ -3261,7 +3259,7 @@ def build_parser() -> argparse.ArgumentParser:
     deploy.add_argument(
         "--bootstrap",
         action="store_true",
-        help="one-time root install of masque-maintain on a pre-operations release",
+        help="one-time root install of laz-masque-maintain on a pre-operations release",
     )
 
     bootstrap = subcommands.add_parser(
@@ -3289,7 +3287,7 @@ def build_parser() -> argparse.ArgumentParser:
     rollout.add_argument(
         "--allow-no-probe",
         action="store_true",
-        help="allow canary verification without an external masque-probe",
+        help="allow canary verification without an external laz-masque-probe",
     )
 
     rollback = subcommands.add_parser(

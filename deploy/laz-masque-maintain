@@ -4,13 +4,13 @@ set -eu
 # This root-owned entrypoint is intentionally narrow enough to grant through a
 # dedicated sudoers rule. It never edits the server configuration, TLS files,
 # routing, firewall, or NAT.
-REPOSITORY=zenith-ent/masque-server
-BOOTSTRAP=/usr/local/libexec/masque-server/install-latest.sh
-BIN=/usr/local/bin/masque-server
+REPOSITORY=ro-gri/laz-masque-server
+BOOTSTRAP=/usr/local/libexec/laz-masque-server/install-latest.sh
+BIN=/usr/local/bin/laz-masque-server
 CONFIG=/etc/masque/masque.toml
 CERT=/etc/masque/certs/server.crt
-SERVICE=masque.service
-LOCK=/run/lock/masque-maintain.lock
+SERVICE=laz-masque.service
+LOCK=/run/lock/laz-masque-maintain.lock
 
 die() {
     echo "error: $*" >&2
@@ -18,7 +18,7 @@ die() {
 }
 
 require_root() {
-    [ "$(id -u)" -eq 0 ] || die "masque-maintain must run as root"
+    [ "$(id -u)" -eq 0 ] || die "laz-masque-maintain must run as root"
 }
 
 status() {
@@ -86,8 +86,11 @@ diagnose() {
 
 validate_version() {
     version=$1
+    case "$version" in
+        *[!0-9A-Za-z.+-]*) die "invalid release version: $version" ;;
+    esac
     printf '%s\n' "$version" |
-        grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$' ||
+        grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$' || \
         die "invalid release version: $version"
 }
 
@@ -113,18 +116,18 @@ require_root
 command=${1:-}
 case "$command" in
     status)
-        [ "$#" -eq 1 ] || die "usage: masque-maintain status"
+        [ "$#" -eq 1 ] || die "usage: laz-masque-maintain status"
         status
         ;;
     diagnose)
-        [ "$#" -le 2 ] || die "usage: masque-maintain diagnose [LINES]"
+        [ "$#" -le 2 ] || die "usage: laz-masque-maintain diagnose [LINES]"
         diagnose "${2:-100}"
         ;;
     upgrade)
-        [ "$#" -eq 2 ] || die "usage: masque-maintain upgrade vVERSION"
+        [ "$#" -eq 2 ] || die "usage: laz-masque-maintain upgrade vVERSION"
         upgrade "$2"
         ;;
     *)
-        die "usage: masque-maintain status | diagnose [LINES] | upgrade vVERSION"
+        die "usage: laz-masque-maintain status | diagnose [LINES] | upgrade vVERSION"
         ;;
 esac

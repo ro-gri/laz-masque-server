@@ -59,7 +59,7 @@ pub fn udp_probe_payload(dns: bool) -> Vec<u8> {
     if dns {
         dns_query()
     } else {
-        b"masque-probe-connect-udp-echo".to_vec()
+        b"laz-masque-probe-connect-udp-echo".to_vec()
     }
 }
 

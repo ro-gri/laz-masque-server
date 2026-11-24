@@ -1,8 +1,8 @@
 # AI-assisted fleet operations
 
-MASQUE Server provides an optional operations layer for repeatable fleet
+Laz MASQUE Server provides an optional operations layer for repeatable fleet
 installation and upgrades. An AI coding agent can interpret an operator's
-request through the installable `masque-ops` Skill, but all privileged work is
+request through the installable `laz-masque-ops` Skill, but all privileged work is
 performed by its deterministic, tested CLI. No model, API key, or AI runtime is
 installed on a proxy server.
 
@@ -25,24 +25,24 @@ Linux and macOS can install the Skill, CLI, inventory example, and matching
 local probe from the latest stable Release with:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/zenith-ent/masque-server/main/install-ops.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ro-gri/laz-masque-server/main/install-ops.sh | sh
 ```
 
 The installer verifies the platform-independent operations archive and the
 platform-specific probe archive against their Release SHA-256 sidecars before
-activation. It installs the Skill at `~/.agents/skills/masque-ops`, the CLI and
+activation. It installs the Skill at `~/.agents/skills/laz-masque-ops`, the CLI and
 probe under `~/.local/bin` for an unprivileged user, and the example under
-`~/.config/masque-server`. Re-running it upgrades these release-managed files
+`~/.config/laz-masque-server`. Re-running it upgrades these release-managed files
 without reading or changing private inventory, state, or credentials. Pin an
 exact version with:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/zenith-ent/masque-server/main/install-ops.sh | \
+curl -fsSL https://raw.githubusercontent.com/ro-gri/laz-masque-server/main/install-ops.sh | \
   env MASQUE_VERSION=vX.Y.Z sh
 ```
 
 Set `MASQUE_OPS_INSTALL_PROBE=0` to skip the probe. A repository checkout also
-works through `scripts/masque-ops.py`, and its repo-scoped Skill is discovered
+works through `scripts/laz-masque-ops.py`, and its repo-scoped Skill is discovered
 without running this installer.
 
 ## New empty host
@@ -52,7 +52,7 @@ command above. On the administration machine, generate a private inventory for
 one empty host instead of editing a template:
 
 ```sh
-masque-ops init-inventory --ssh-host 203.0.113.10 \
+laz-masque-ops init-inventory --ssh-host 203.0.113.10 \
   --auth-mode basic --transport http3 --self-signed
 ```
 
@@ -82,8 +82,8 @@ configured H2/H3 endpoint and authentication combination that must stay working.
 selected explicitly with `ip_setup_only` in the probe settings. The inventory
 and credential files remain outside the checkout.
 
-The transport-aware fresh installer requires a release that includes this
-feature (v0.14.4 or newer); the tool rejects older releases for HTTP/2 setup.
+The transport-aware fresh installer supports HTTP/2 starting with Laz MASQUE
+Server v0.1.0; version checks use the fork's independent release sequence.
 The generated certificate-client enrollment file contains a private key and
 must be delivered privately. A configuration example does not prove runtime
 compatibility: verify the selected protocol paths after installation.
@@ -95,7 +95,7 @@ The default self-signed mode creates a certificate on the empty server during
 bootstrap and retrieves only its public certificate for the probe. Clients must
 install or otherwise trust that certificate. It expires after 365 days; the
 tool does not automatically renew it or redistribute a replacement. After installation, use
-`masque-ops export-probe-ca --out /private/public-ca.pem` to copy the public
+`laz-masque-ops export-probe-ca --out /private/public-ca.pem` to copy the public
 certificate into a new file in a private directory; the command refuses to
 copy a private key or overwrite a file. To use an existing domain
 certificate instead, pass `--existing-certificate`, the public proxy hostname
@@ -111,9 +111,9 @@ renewal deploy hook to install the renewed chain and key and reload MASQUE;
 see [Certbot's user guide](https://eff-certbot.readthedocs.io/en/stable/using.html).
 
 Verify the SSH host key independently before the first connection. AI can then
-run `masque-ops validate` and `masque-ops bootstrap` for a latest-stable
+run `laz-masque-ops validate` and `laz-masque-ops bootstrap` for a latest-stable
 preflight. Review its exact version and planned dependency installation; after
-authorization, run `masque-ops bootstrap --version vX.Y.Z --apply`. On empty
+authorization, run `laz-masque-ops bootstrap --version vX.Y.Z --apply`. On empty
 Debian/Ubuntu or DNF-based hosts, missing installer dependencies are installed
 automatically. The tool does not open host or cloud firewalls, configure DNS,
 or set up CONNECT-IP forwarding; arrange those separately when required.
@@ -124,22 +124,22 @@ Fresh install has no previous version to restore if post-install checks fail.
 Copy the installed example and protect the private file:
 
 ```sh
-install -d -m 0700 ~/.config/masque-server ~/.config/masque-server/secrets
-install -m 0600 ~/.config/masque-server/fleet.example.toml \
-  ~/.config/masque-server/fleet.toml
+install -d -m 0700 ~/.config/laz-masque-server ~/.config/laz-masque-server/secrets
+install -m 0600 ~/.config/laz-masque-server/fleet.example.toml \
+  ~/.config/laz-masque-server/fleet.toml
 ```
 
 Replace all documentation addresses and endpoints. The default location is
-`~/.config/masque-server/fleet.toml`; set `MASQUE_OPS_INVENTORY` or pass
+`~/.config/laz-masque-server/fleet.toml`; set `MASQUE_OPS_INVENTORY` or pass
 `--inventory` to use another file. The inventory only accepts the official
-`zenith-ent/masque-server` release source and must not contain inline
+`ro-gri/laz-masque-server` release source and must not contain inline
 passwords. Referenced SSH identities, probe passwords, and client enrollment
 files are checked separately and must be private regular files rather than
-symlinks. The CLI maps the previous official repository name to the current
-release source when it reads an existing inventory.
+symlinks. Existing inventories naming an upstream or old repository must be
+updated explicitly; the CLI does not silently change their release source.
 
 AI agents must not open the inventory or any referenced file. They pass only
-the inventory path and a host alias to `masque-ops`; its output omits SSH
+the inventory path and a host alias to `laz-masque-ops`; its output omits SSH
 addresses, key paths, remote TLS paths, usernames, passwords, and generated
 client-file paths. The deterministic CLI is the only component that parses the
 private inventory or handles secret bytes.
@@ -148,12 +148,12 @@ If it was omitted from the operations install, install the release-matched
 probe separately on Linux or macOS x86_64/ARM64:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/zenith-ent/masque-server/main/install-probe.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ro-gri/laz-masque-server/main/install-probe.sh | sh
 ```
 
 An unprivileged install goes to `~/.local/bin`; root installs to
 `/usr/local/bin`. Every archive is verified against its release SHA-256 before
-replacement. `masque-ops` also checks `~/.local/bin` when `masque-probe` is not
+replacement. `laz-masque-ops` also checks `~/.local/bin` when `laz-masque-probe` is not
 already in `PATH`.
 
 Verify SSH host fingerprints out of band before placing them in the configured
@@ -166,10 +166,10 @@ the default is noninteractive key or agent authentication.
 ## Read-only inspection
 
 ```sh
-masque-ops validate
-masque-ops status
-masque-ops plan --version vX.Y.Z
-masque-ops diagnose edge-a --journal-lines 100
+laz-masque-ops validate
+laz-masque-ops status
+laz-masque-ops plan --version vX.Y.Z
+laz-masque-ops diagnose edge-a --journal-lines 100
 ```
 
 `status` checks the installed version, architecture, service state,
@@ -188,7 +188,7 @@ sharing it. Place `--json` before the subcommand for structured output.
 On the administration machine, run:
 
 ```sh
-masque-ops configure-probe
+laz-masque-ops configure-probe
 ```
 
 The guided setup selects the only host, or the designated canary in a fleet,
@@ -204,7 +204,7 @@ credentials private; do not paste them into chat or a repository.
 For automation, pass the endpoint and an existing private credential file:
 
 ```sh
-masque-ops configure-probe --endpoint proxy.example.com:8449 \
+laz-masque-ops configure-probe --endpoint proxy.example.com:8449 \
   --username probe-user --password-file /private/probe-password
 ```
 
@@ -234,7 +234,7 @@ also use only `[[hosts.probes]]`. Every list entry requires an explicit `http2`
 or `http3` transport; legacy primary probes still accept `auto`, which verifies
 only the transport it selects. The CLI does not infer missing listeners or
 credentials, or enable listeners on the server. See the installed example and
-[inventory reference](../.agents/skills/masque-ops/references/inventory.md#external-probes).
+[inventory reference](../.agents/skills/laz-masque-ops/references/inventory.md#external-probes).
 
 There are at most eight required checks per host, including the primary and
 legacy dual check. They run sequentially, stop at the first failure, and retain
@@ -248,14 +248,14 @@ array of sanitized summaries; existing single-probe output is unchanged.
 Mutations require an exact version and the explicit `--apply` gate:
 
 ```sh
-masque-ops plan --version vX.Y.Z
-masque-ops deploy edge-a --version vX.Y.Z --apply
-masque-ops rollout --version vX.Y.Z --apply
-masque-ops rollback edge-a --apply
+laz-masque-ops plan --version vX.Y.Z
+laz-masque-ops deploy edge-a --version vX.Y.Z --apply
+laz-masque-ops rollout --version vX.Y.Z --apply
+laz-masque-ops rollback edge-a --apply
 ```
 
 With one selected host, `rollout` selects it automatically and normally requires
-an external `masque-probe`; no canary designation is needed. With multiple
+an external `laz-masque-probe`; no canary designation is needed. With multiple
 selected hosts, it requires exactly one canary, verifies it first, and then
 proceeds sequentially. For a single-host inventory, `deploy` and `rollback`
 also select the host automatically. A host is considered upgraded only after systemd is active, the
@@ -279,13 +279,13 @@ shows Basic mode; `client_cert` and `dual` additionally require
 First run the non-mutating preflight:
 
 ```sh
-masque-ops bootstrap edge-new --version vX.Y.Z
+laz-masque-ops bootstrap edge-new --version vX.Y.Z
 ```
 
 After explicit approval, the same command performs the install:
 
 ```sh
-masque-ops bootstrap edge-new --version vX.Y.Z --apply
+laz-masque-ops bootstrap edge-new --version vX.Y.Z --apply
 ```
 
 The CLI requires a verified root SSH entry for this one operation. It confirms
@@ -310,8 +310,8 @@ material.
 ## Remote maintenance boundary
 
 Release installation puts a root-owned helper at
-`/usr/local/sbin/masque-maintain` and a pinned copy of the verified bootstrap at
-`/usr/local/libexec/masque-server/install-latest.sh`. The helper exposes only
+`/usr/local/sbin/laz-masque-maintain` and a pinned copy of the verified bootstrap at
+`/usr/local/libexec/laz-masque-server/install-latest.sh`. The helper exposes only
 `status`, bounded `diagnose`, and an exact-version `upgrade`. Upgrade downloads
 from the official repository, verifies the archive SHA-256, serializes changes
 with `flock`, validates the existing configuration with the candidate binary,
@@ -320,7 +320,7 @@ rollback.
 
 This narrow command can be granted to a dedicated SSH account with sudo. See
 the Skill's
-[`inventory.md`](../.agents/skills/masque-ops/references/inventory.md) for the
+[`inventory.md`](../.agents/skills/laz-masque-ops/references/inventory.md) for the
 sudoers example and probe configuration. A server running an older release
 does not yet have the helper; its first transition requires the explicit,
 root-only `deploy --bootstrap` path. Remove root SSH from the inventory after
@@ -329,8 +329,8 @@ that transition.
 ## Using the Skill
 
 Codex-compatible agents discover either the installed
-`~/.agents/skills/masque-ops/SKILL.md` or the repo-scoped copy automatically
-after startup. A typical request is: “Use `$masque-ops` to inspect the fleet and
+`~/.agents/skills/laz-masque-ops/SKILL.md` or the repo-scoped copy automatically
+after startup. A typical request is: “Use `$laz-masque-ops` to inspect the fleet and
 prepare an upgrade plan for `vX.Y.Z`.” Inspection and planning do not authorize
 deployment; ask explicitly to execute the reviewed plan before the agent may
 add `--apply`.

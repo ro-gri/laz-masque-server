@@ -15,10 +15,10 @@ use masque::host;
 use masque::server::{Server, validate_config};
 use masque::support;
 
-/// MASQUE proxy server (CONNECT, CONNECT-UDP, and CONNECT-IP over HTTP/2 or
+/// Laz MASQUE Server (CONNECT, CONNECT-UDP, and CONNECT-IP over HTTP/2 or
 /// HTTP/3).
 #[derive(Parser)]
-#[command(name = "masque-server", version)]
+#[command(name = "laz-masque-server", version)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -530,9 +530,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Logging
     let default_filter = match cli.verbose {
-        0 => "masque=info,masque_server=info",
-        1 => "masque=debug,masque_server=debug",
-        _ => "masque=trace,masque_server=trace",
+        0 => "masque=info,laz_masque_server=info",
+        1 => "masque=debug,laz_masque_server=debug",
+        _ => "masque=trace,laz_masque_server=trace",
     };
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter));
@@ -765,7 +765,7 @@ async fn main() -> anyhow::Result<()> {
             "configuration validated"
         );
         println!(
-            "configuration is compatible with masque-server {}: {}",
+            "configuration is compatible with laz-masque-server {}: {}",
             env!("CARGO_PKG_VERSION"),
             cli.config.display()
         );
@@ -807,7 +807,7 @@ async fn main() -> anyhow::Result<()> {
     if matches!(cli.command, Some(Command::Doctor)) {
         validate_config(&cfg)?;
         println!(
-            "configuration is compatible with masque-server {}: {}",
+            "configuration is compatible with laz-masque-server {}: {}",
             env!("CARGO_PKG_VERSION"),
             cli.config.display()
         );
@@ -858,7 +858,7 @@ async fn main() -> anyhow::Result<()> {
             tun = %cfg.ip_proxy.tun_name,
             ipv4_pool = %cfg.ip_proxy.ipv4_pool,
             ipv6_pool = %cfg.ip_proxy.ipv6_pool,
-            "CONNECT-IP host routing, firewall, and optional NAT remain operator-managed; run `masque-server doctor` to inspect them"
+            "CONNECT-IP host routing, firewall, and optional NAT remain operator-managed; run `laz-masque-server doctor` to inspect them"
         );
     }
 
