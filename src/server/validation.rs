@@ -342,6 +342,12 @@ pub(super) fn validate_server_config(
     // Surface a bad credential or active roster configuration first. A roster
     // outside client-cert mode is deliberately not parsed or allowed to
     // reserve pool addresses: the configuration contract says it is ignored.
+    if let Some(addr) = config.accounting.listen_addr {
+        anyhow::ensure!(
+            is_loopback(addr.ip()),
+            "accounting.listen_addr must use a loopback address"
+        );
+    }
     crate::credential_id::validate(config)?;
     let clients = active_client_registry(config, any_client_cert)?;
     if any_client_cert {

@@ -52,6 +52,7 @@ pub(super) async fn serve(
     let response = Response::builder().status(StatusCode::OK).body(())?;
     let mut send = respond.send_response(response, false)?;
     info!(stream_id, %target_addr, transport = "http2", "TCP tunnel established");
+    let _online = context.usage.activate();
     let _metrics = TunnelMetricsGuard::new(Arc::clone(&context.metrics), 0);
     let activity = Arc::new(Activity::new());
     let (mut target_read, mut target_write) = stream.into_split();
@@ -59,6 +60,7 @@ pub(super) async fn serve(
     let client_to_target = async {
         while let Some(chunk) = body.data().await {
             let chunk = chunk?;
+            context.usage.rx(chunk.len());
             target_write.write_all(&chunk).await?;
             body.flow_control().release_capacity(chunk.len())?;
             activity.touch();
@@ -84,6 +86,7 @@ pub(super) async fn serve(
                         send_data(&mut send, Bytes::new(), true).await?;
                         return Ok::<_, anyhow::Error>(());
                     }
+                    context.usage.tx(read);
                     activity.touch();
                     send_data(&mut send, Bytes::copy_from_slice(&buf[..read]), false).await?;
                 }

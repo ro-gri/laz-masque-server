@@ -457,3 +457,83 @@ fn download_survives_a_lost_packet_with_a_small_stream_window() {
         origin.join().unwrap();
     }
 }
+
+#[test]
+fn accounting_counts_tcp_payload_once_across_partial_writes_and_disconnect() {
+    let dir = TempDir::new("tcp-accounting");
+    let key = p256_key();
+    let (cert, key) = write_pem(
+        dir.path(),
+        "server",
+        &key,
+        &self_signed(&key, Some("localhost")),
+    );
+    let target = std::net::TcpListener::bind(ephemeral_addr()).unwrap();
+    let address = target.local_addr().unwrap();
+    let payload = vec![42; 96 * 1024];
+    let expected = payload.clone();
+    let echo = std::thread::spawn(move || {
+        let (mut socket, _) = target.accept().unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut received = Vec::new();
+        socket.read_to_end(&mut received).unwrap();
+        assert_eq!(received, expected);
+        socket.write_all(b"response payload").unwrap();
+    });
+    let mut config = ServerConfig::default();
+    config.tls.cert_path = cert;
+    config.tls.key_path = key;
+    config.listeners[0].listen_addr = ephemeral_addr();
+    config.listeners[0].shards = 1;
+    let id = uuid::Uuid::new_v4();
+    config.listeners[0].auth.id = id;
+    config.listeners[0].auth.username = BASIC_USERNAME.into();
+    config.listeners[0].auth.password_hash =
+        masque::auth::hash_password(BASIC_PASSWORD.as_bytes()).unwrap();
+    config.tcp_proxy.allow_targets = vec!["127.0.0.0/8".into()];
+    config.tcp_proxy.deny_targets.clear();
+    config.accounting.listen_addr = Some(ephemeral_addr());
+    let (peers, stats) = spawn_server_with_accounting(config);
+    let mut client = Client::connect_anonymous(peers[0]).unwrap();
+    client.handshake(Duration::from_secs(5)).unwrap();
+    client.init_h3().unwrap();
+    let credentials = format!(
+        "Basic {}",
+        STANDARD.encode(format!("{BASIC_USERNAME}:{BASIC_PASSWORD}"))
+    );
+    let stream = client
+        .h3
+        .as_mut()
+        .unwrap()
+        .send_request(
+            &mut client.quic,
+            &[
+                quiche::h3::Header::new(b":method", b"CONNECT"),
+                quiche::h3::Header::new(b":authority", address.to_string().as_bytes()),
+                quiche::h3::Header::new(b"proxy-authorization", credentials.as_bytes()),
+            ],
+            false,
+        )
+        .unwrap();
+    let mut sent = 0;
+    let mut response = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        send_upload(&mut client, stream, &payload, &mut sent);
+        client.drive().unwrap();
+        if poll_upload(&mut client, stream, &mut response) {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+    }
+    assert_eq!(response, b"response payload");
+    echo.join().unwrap();
+    let value = accounting::wait(stats, |v| {
+        v["traffic"][0]["rx_bytes"] == payload.len()
+            && v["traffic"][0]["tx_bytes"] == response.len()
+    });
+    assert_eq!(value["traffic"][0]["id"], id.to_string());
+    accounting::wait(stats, |v| v["online"] == serde_json::json!([]));
+}

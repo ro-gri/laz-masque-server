@@ -75,7 +75,7 @@ impl Shard {
             let expired_ip: Vec<u64> = client
                 .pending_ip_responses
                 .iter()
-                .filter_map(|(stream, started)| (started.elapsed() > timeout).then_some(*stream))
+                .filter_map(|(stream, started)| (started.0.elapsed() > timeout).then_some(*stream))
                 .collect();
             for stream in expired_ip {
                 client.pending_ip_responses.remove(&stream);

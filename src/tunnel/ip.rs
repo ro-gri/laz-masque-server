@@ -10,6 +10,8 @@ use crate::datagram::DatagramHeader;
 
 /// State for a single CONNECT-IP tunnel.
 pub struct IpTunnel {
+    pub(crate) online: crate::accounting::Online,
+    pub(crate) usage: crate::accounting::Usage,
     /// The HTTP/3 stream ID this tunnel is bound to.
     pub stream_id: u64,
     /// IP addresses assigned to this client.
@@ -25,6 +27,8 @@ impl IpTunnel {
     /// bidirectional stream (divisible by 4).
     pub fn new(stream_id: u64) -> Self {
         Self {
+            online: Default::default(),
+            usage: Default::default(),
             stream_id,
             assigned_addrs: Vec::new(),
             last_activity: Instant::now(),

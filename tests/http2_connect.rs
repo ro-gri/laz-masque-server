@@ -1,5 +1,8 @@
 //! End-to-end coverage for the HTTP/2 compatibility transport.
 
+#[path = "support/accounting.rs"]
+mod accounting;
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -702,7 +705,21 @@ async fn connect_udp_relays_datagram_capsules_over_http2() {
         }
     });
 
-    let (server_addr, server_task) = spawn_http2_server(&files).await;
+    let mut config = http2_config(&files);
+    let id = uuid::Uuid::new_v4();
+    config.listeners[0].auth = masque::config::AuthSection {
+        id,
+        username: "alice".into(),
+        password_hash: masque::auth::hash_password(b"secret").unwrap(),
+        ..Default::default()
+    };
+    config.accounting.listen_addr = Some("127.0.0.1:0".parse().unwrap());
+    let mut bound = Server::bind(config).await.unwrap();
+    let server_addr = bound.listen_addrs()[0];
+    let stats = bound.accounting_addr().unwrap();
+    let server_task = tokio::spawn(async move {
+        bound.run().await.unwrap();
+    });
     let (mut client, driver) = connect_h2(server_addr).await;
     let uri = format!(
         "https://localhost/.well-known/masque/udp/{}/{}/",
@@ -713,6 +730,10 @@ async fn connect_udp_relays_datagram_capsules_over_http2() {
         .method(Method::CONNECT)
         .uri(uri)
         .header("capsule-protocol", "?1")
+        .header(
+            "proxy-authorization",
+            format!("Basic {}", STANDARD.encode("alice:secret")),
+        )
         .body(())
         .unwrap();
     request
@@ -751,7 +772,15 @@ async fn connect_udp_relays_datagram_capsules_over_http2() {
             .collect::<Vec<_>>()
     );
 
+    let value = accounting::read(stats);
+    assert_eq!(value["online"], serde_json::json!([id]));
+    assert_eq!(
+        value["traffic"],
+        serde_json::json!([{ "id": id, "rx_bytes": u64::from(PACKETS) * 64, "tx_bytes": u64::from(PACKETS) * 64 }])
+    );
     request_body.send_data(Bytes::new(), true).unwrap();
+    let after = accounting::wait(stats, |v| v["online"] == serde_json::json!([]));
+    assert_eq!(after["traffic"], value["traffic"]);
     target_task.await.unwrap();
     server_task.abort();
     driver.abort();
@@ -1630,9 +1659,12 @@ async fn http_authorization_basic_authorizes_tcp_and_reuses_cached_decision() {
             stream.write_all(&b).await.unwrap();
         }
     });
+    config.accounting.listen_addr = Some("127.0.0.1:0".parse().unwrap());
     config.listeners.push(config.listeners[0].clone());
     let mut bound = Server::bind(config).await.unwrap();
     let addresses = bound.listen_addrs().to_vec();
+    let stats = bound.accounting_addr().unwrap();
+    assert!(bound.observability_addr().is_none());
     let server = tokio::spawn(async move {
         bound.run().await.unwrap();
     });
@@ -1670,6 +1702,11 @@ async fn http_authorization_basic_authorizes_tcp_and_reuses_cached_decision() {
             .load(std::sync::atomic::Ordering::Relaxed),
         1
     );
+    let value = accounting::wait(stats, |value| {
+        value["traffic"][0]["rx_bytes"] == 2 && value["traffic"][0]["tx_bytes"] == 2
+    });
+    assert_eq!(value["traffic"].as_array().unwrap().len(), 1);
+    assert_eq!(value["traffic"][0]["id"], id.to_string());
     echo.await.unwrap();
     driver.abort();
     second_driver.abort();
@@ -1781,14 +1818,24 @@ async fn http_authorization_reload_clears_cache_and_rejects_invalid_replacement(
             ..Default::default()
         }),
     };
+    config.accounting.listen_addr = Some("127.0.0.1:0".parse().unwrap());
     let path = files.directory.join("http-auth.toml");
     std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
-    let (addr, server) = spawn_reloadable_http2_config(config.clone(), path.clone()).await;
+    let mut bound = Server::bind_with_reload(config.clone(), Some(path.clone()))
+        .await
+        .unwrap();
+    let stats = bound.accounting_addr().unwrap();
+    let addr = bound.listen_addrs()[0];
+    let server = tokio::spawn(async move {
+        bound.run().await.unwrap();
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
     let (client, driver) = connect_h2(addr).await;
     assert_eq!(
         basic_connect_status(&client, "alice", "secret").await,
         StatusCode::BAD_GATEWAY
     );
+    let initial_stats = accounting::read(stats);
     allowed.store(false, std::sync::atomic::Ordering::Relaxed);
     assert_eq!(
         basic_connect_status(&client, "alice", "secret").await,
@@ -1824,6 +1871,11 @@ async fn http_authorization_reload_clears_cache_and_rejects_invalid_replacement(
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     assert_eq!(replacement.count(), 1);
+    let final_stats = accounting::read(stats);
+    assert_eq!(initial_stats["instance_id"], final_stats["instance_id"]);
+    for row in initial_stats["traffic"].as_array().unwrap() {
+        assert!(final_stats["traffic"].as_array().unwrap().contains(row));
+    }
     driver.abort();
     server.abort();
 }

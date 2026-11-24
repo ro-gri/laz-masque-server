@@ -279,6 +279,7 @@ pub(crate) struct UdpSetupResult {
 
 /// A CONNECT-UDP stream whose one-shot resolution/socket setup is in flight.
 pub(crate) struct PendingUdpTunnel {
+    pub(crate) usage: crate::accounting::Usage,
     header: crate::datagram::DatagramHeader,
     started_at: Instant,
     setup_task: Option<JoinHandle<()>>,
@@ -292,6 +293,7 @@ impl PendingUdpTunnel {
         early_udp_budget: EarlyUdpBudget,
     ) -> Self {
         Self {
+            usage: Default::default(),
             header,
             started_at: Instant::now(),
             setup_task: None,
@@ -305,6 +307,7 @@ impl PendingUdpTunnel {
         early_datagrams: EarlyUdpDatagrams,
     ) -> Self {
         Self {
+            usage: Default::default(),
             header,
             started_at: Instant::now(),
             setup_task: None,
@@ -472,6 +475,8 @@ pub(crate) fn spawn_udp_setup(
 
 /// State for a single CONNECT-UDP tunnel.
 pub struct UdpTunnel {
+    pub(crate) online: crate::accounting::Online,
+    pub(crate) usage: crate::accounting::Usage,
     association: Option<Arc<UdpAssociation>>,
     /// The HTTP/3 stream ID this tunnel is bound to.
     pub stream_id: u64,
@@ -527,6 +532,8 @@ impl UdpTunnel {
         );
 
         Ok(Self {
+            online: Default::default(),
+            usage: Default::default(),
             association: None,
             stream_id,
             socket: Arc::new(socket),
@@ -555,6 +562,8 @@ impl UdpTunnel {
         let _ = udp_gso;
 
         Self {
+            online: Default::default(),
+            usage: Default::default(),
             association,
             stream_id,
             socket,
@@ -624,6 +633,7 @@ impl UdpTunnel {
             buffer.clear();
             buffer.extend_from_slice(payload);
         }
+        self.usage.rx(payload.len());
         self.staged += 1;
         self.staged >= TARGET_BATCH_SIZE
     }

@@ -646,6 +646,7 @@ impl Shard {
                         let tcp_setup_count = pending_setups.tcp.len();
                         let udp_setup_count = pending_setups.udp.len();
                         let mut request_context = RequestContext {
+                            credential_id: client.identity.as_ref().map(|identity| identity.id),
                             peer_key: client.external_certificate_key.as_deref(),
                             metrics: &self.metrics,
                             config: &self.config,

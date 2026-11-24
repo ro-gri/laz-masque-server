@@ -467,3 +467,18 @@ success cache and coalesced in-flight work. Certificate proof/chain validation
 remains in TLS; the authorization gate precedes target setup and CONNECT-IP allocation.
 Neither the TLS callback nor packet forwarding performs HTTP I/O. File-mode
 roster behavior is unchanged. See [the contract and limits](http-authorization.md).
+
+## Credential accounting
+
+Optional `accounting.rs` retains one cumulative counter set per credential UUID
+for the server lifetime, independently of the authorization cache. Authentication
+returns the UUID on both cold and warm paths; established tunnels keep counter
+references and an RAII online guard. H3 pending setups carry the reference until
+response acceptance, including blocked-response retries. H2 tunnel tasks use the
+same counters. No global UUID-table lookup occurs for each payload update.
+
+The registry is shared across listeners and remains unchanged on configuration
+reload. Entries have no eviction or cardinality limit: memory grows with distinct
+admitted credentials, as documented in [the API contract](accounting.md).
+`accounting_http.rs` streams bounded batches on a separate optional loopback
+socket, with bounded concurrent requests and abort-on-shutdown task ownership.

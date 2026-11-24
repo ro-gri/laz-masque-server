@@ -3,6 +3,11 @@
 [authorization]
 backend = "file"
 
+# Optional per-credential cumulative traffic and online UUIDs, independent of
+# Prometheus. Retains all encountered UUIDs until process exit; no eviction.
+# [accounting]
+# listen_addr = "127.0.0.1:9091"
+
 [server]
 # Keep this above the client's keepalive period. VPN-style MASQUE clients
 # commonly default to 30s, and matching that exactly makes a quiet tunnel race

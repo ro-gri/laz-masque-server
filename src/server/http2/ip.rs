@@ -167,6 +167,7 @@ pub(super) async fn serve(
     // Initial control DATA is flow controlled too. A peer with a zero (or
     // insufficient) window must not retain a lease and admission slot forever
     // before the relay's inactivity timer starts. Cancellation drops the lease.
+    let _online = context.usage.activate();
     let _metrics = TunnelMetricsGuard::new(Arc::clone(&context.metrics), 2);
     match tokio::time::timeout(
         Duration::from_secs(context.config.server.idle_timeout_secs),
@@ -290,6 +291,7 @@ pub(super) async fn serve(
                     if tun_send.is_full() {
                         tun.send_batch(&mut tun_send).await?;
                     }
+                    context.usage.rx(packet.len());
                     tun_send.push(packet);
                 }
             }
@@ -318,6 +320,7 @@ pub(super) async fn serve(
             };
             response_capsules.clear();
             if packet.len() <= max_ip_packet {
+                context.usage.tx(packet.len());
                 capsule_mode.encode_packet(&packet, &mut response_capsules);
             }
             while response_capsules.len() < RESPONSE_BATCH_SIZE {
@@ -329,6 +332,7 @@ pub(super) async fn serve(
                     }
                 };
                 if packet.len() <= max_ip_packet {
+                    context.usage.tx(packet.len());
                     capsule_mode.encode_packet(&packet, &mut response_capsules);
                 }
             }

@@ -1182,3 +1182,13 @@ limits and the supported SOCKS5 contract. The default remains DIRECT; changes re
 restart, except CIDR file contents: `reload-direct-cidrs` applies those alone
 through the owner-only local socket. Upstream-password changes still require
 a restart. See the routing guide for command results and snapshot semantics.
+
+## Credential traffic accounting
+
+`[accounting].listen_addr` enables a separate loopback-only `GET /stats` API.
+It is disabled by default and independent of `[observability]`/Prometheus.
+The response contains a startup instance UUID, cumulative RX/TX by credential
+UUID and the set of online credentials. Counters survive authorization-cache
+expiry, reload and disconnect, and are retained without eviction or a UUID
+limit until process exit. See [the accounting contract](accounting.md) for byte
+semantics, memory growth, collection consistency and restart behavior.

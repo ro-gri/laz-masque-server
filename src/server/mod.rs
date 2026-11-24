@@ -248,6 +248,7 @@ pub struct Server {
     shared: Arc<Shared>,
     metrics: Arc<Metrics>,
     observability: Option<ObservabilityServer>,
+    accounting_api: Option<crate::accounting_http::Server>,
 }
 
 /// Capture only the startup state that a configuration reload may use.
@@ -449,6 +450,7 @@ impl Server {
         let config_reload = config_reload_settings(&config, config_path);
 
         let shared = Arc::new(Shared {
+            accounting: Arc::new(crate::accounting::Accounting::new(&config.accounting)),
             outbound,
             loaded_config,
             ip_policy: TargetPolicy::new(
@@ -597,6 +599,12 @@ impl Server {
             }
         }
 
+        let accounting_api = match config.accounting.listen_addr {
+            Some(addr) => {
+                Some(crate::accounting_http::Server::bind(addr, shared.accounting.clone()).await?)
+            }
+            None => None,
+        };
         let observability = match config.observability.listen_addr {
             Some(addr) => Some(ObservabilityServer::bind(addr, Arc::clone(&metrics)).await?),
             None => None,
@@ -616,6 +624,7 @@ impl Server {
             shared,
             metrics,
             observability,
+            accounting_api,
         })
     }
 
@@ -626,6 +635,13 @@ impl Server {
     /// reports it too. Shards of one listener share an address and repeat here.
     pub fn listen_addrs(&self) -> Vec<SocketAddr> {
         self.listen_addrs.clone()
+    }
+
+    /// Bound per-credential accounting API address, if enabled.
+    pub fn accounting_addr(&self) -> Option<SocketAddr> {
+        self.accounting_api
+            .as_ref()
+            .and_then(|api| api.local_addr().ok())
     }
 
     /// Bound observability address, including a kernel-selected test port.
@@ -720,6 +736,11 @@ impl Server {
             .context("failed to install shutdown signal handlers")?;
         debug!("shutdown signal handlers installed");
 
+        let _accounting_task = AccountingTask(
+            self.accounting_api
+                .take()
+                .map(crate::accounting_http::Server::spawn),
+        );
         let observability_task = self.observability.take().map(ObservabilityServer::spawn);
         self.metrics.set_ready(true);
         let watchdog_task = watchdog_timeout.map(|timeout| {
@@ -1553,6 +1574,7 @@ struct ReloadListener {
 /// owner, and the ownership maps only when a connection is created or
 /// destroyed, or one of its connection IDs is published or retired.
 struct Shared {
+    accounting: Arc<crate::accounting::Accounting>,
     outbound: Arc<crate::outbound::Router>,
     loaded_config: Arc<crate::runtime_status::LoadedConfig>,
     /// Immutable destination ACL, shared by both CONNECT-IP transports.
@@ -2328,6 +2350,15 @@ pub(crate) fn runtime_tls_fingerprints(
     Ok(tls::SharedTlsIdentity::new(config)?.fingerprints())
 }
 
+struct AccountingTask(Option<tokio::task::JoinHandle<()>>);
+impl Drop for AccountingTask {
+    fn drop(&mut self) {
+        if let Some(task) = &self.0 {
+            task.abort();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::config::{
@@ -2540,6 +2571,27 @@ mod tests {
             Err(error) => error.to_string(),
         };
         assert!(error.contains("must use a loopback address"), "{error}");
+    }
+
+    #[test]
+    fn accounting_rejects_non_loopback_addresses_before_loading_tls() {
+        for addr in [
+            "0.0.0.0:9091",
+            "192.0.2.1:9091",
+            "[::]:9091",
+            "[::ffff:192.0.2.1]:9091",
+        ] {
+            let mut config = ServerConfig::default();
+            config.accounting.listen_addr = Some(addr.parse().unwrap());
+            let error = match super::validate_server_config(&config) {
+                Ok(_) => panic!("public accounting API accepted"),
+                Err(error) => error.to_string(),
+            };
+            assert!(
+                error.contains("accounting.listen_addr must use a loopback address"),
+                "{error}"
+            );
+        }
     }
 
     #[test]

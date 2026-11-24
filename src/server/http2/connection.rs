@@ -283,7 +283,7 @@ struct RequestAdmission {
 async fn handle_request(
     request: Request<h2::RecvStream>,
     mut respond: SendResponse<Bytes>,
-    context: ConnectionContext,
+    mut context: ConnectionContext,
     connection_index: u64,
     authenticated_identity: Option<Arc<ClientIdentity>>,
     admission: RequestAdmission,
@@ -294,20 +294,21 @@ async fn handle_request(
         return;
     };
 
-    if matches!(
-        auth::authorize_request(
-            request.headers(),
-            recognized.accepts_authorization(),
-            &mut respond,
-            &context,
-            admission.auth_slots,
-            admission.source_ip,
-        )
-        .await,
-        Authorization::ResponseSent
-    ) {
-        return;
-    }
+    let id = match auth::authorize_request(
+        request.headers(),
+        recognized.accepts_authorization(),
+        &mut respond,
+        &context,
+        admission.auth_slots,
+        admission.source_ip,
+    )
+    .await
+    {
+        Authorization::Granted(id) => {
+            id.or_else(|| authenticated_identity.as_ref().map(|identity| identity.id))
+        }
+        Authorization::ResponseSent => return,
+    };
 
     if let Some(auth) = &admission.first_auth
         && !auth.verified.load(Ordering::Acquire)
@@ -336,6 +337,7 @@ async fn handle_request(
             return;
         }
     };
+    context.usage = context.shared.accounting.acquire(id);
     let (_parts, body) = request.into_parts();
 
     let result = match kind {

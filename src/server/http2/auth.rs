@@ -37,7 +37,7 @@ pub(super) fn identify_current_client(
 }
 
 pub(super) enum Authorization {
-    Granted,
+    Granted(Option<uuid::Uuid>),
     ResponseSent,
 }
 
@@ -51,7 +51,7 @@ pub(super) async fn authorize_request(
     source_ip: std::net::IpAddr,
 ) -> Authorization {
     let Some(auth) = &context.auth else {
-        return Authorization::Granted;
+        return Authorization::Granted(None);
     };
 
     let authorization = accepts_authorization
@@ -70,10 +70,10 @@ pub(super) async fn authorize_request(
     }
     let (credential, password) =
         match auth.precheck_peer(first, context.peer_key.as_deref().map(Vec::as_slice)) {
-            AuthPrecheck::Authenticated => {
+            AuthPrecheck::Authenticated(id) => {
                 context.metrics.record_auth_cache_hit();
                 context.metrics.record_auth_success();
-                return Authorization::Granted;
+                return Authorization::Granted(Some(id));
             }
             AuthPrecheck::Rejected => {
                 context.metrics.record_auth_failure();
@@ -116,7 +116,7 @@ pub(super) async fn authorize_request(
         _ = poll_fn(|cx| respond.poll_reset(cx)) => return Authorization::ResponseSent,
     };
     match authorized {
-        AuthResult::Authorized => Authorization::Granted,
+        AuthResult::Authorized(id) => Authorization::Granted(Some(id)),
         AuthResult::Rejected => {
             let _ = send_auth_rejection(respond);
             Authorization::ResponseSent
@@ -129,7 +129,7 @@ pub(super) async fn authorize_request(
 }
 
 enum AuthResult {
-    Authorized,
+    Authorized(uuid::Uuid),
     Rejected,
     Overloaded,
 }
@@ -160,8 +160,8 @@ async fn verify_password(
     )
     .await
     {
-        Some(true) => AuthResult::Authorized,
-        Some(false) | None => AuthResult::Rejected,
+        Some(Some(id)) => AuthResult::Authorized(id),
+        Some(None) | None => AuthResult::Rejected,
     }
 }
 

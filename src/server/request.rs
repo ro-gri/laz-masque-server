@@ -38,6 +38,7 @@ pub(super) struct PendingAuth {
 /// Setup itself runs after the HTTP/3 connection borrow is released.
 #[derive(Default)]
 pub(super) struct PendingConnectSetups {
+    pub(super) credentials: crate::fxhash::FxHashMap<u64, uuid::Uuid>,
     pub(super) tcp: Vec<(u64, uri::TcpTarget)>,
     pub(super) udp: Vec<(u64, uri::UdpTarget, crate::datagram::DatagramHeader)>,
     pub(super) ip: Vec<u64>,
@@ -127,6 +128,7 @@ pub(super) fn prepare_connect_ip(
 
 /// Shared request dependencies passed together to keep dispatch APIs focused.
 pub(super) struct RequestContext<'a> {
+    pub(super) credential_id: Option<uuid::Uuid>,
     pub(super) metrics: &'a crate::metrics::ShardMetrics,
     pub(super) config: &'a ServerConfig,
     pub(super) peer_key: Option<&'a [u8]>,
@@ -197,7 +199,8 @@ impl Shard {
                 return None;
             }
             match auth.precheck_peer(headers.basic_authorization, context.peer_key) {
-                AuthPrecheck::Authenticated => {
+                AuthPrecheck::Authenticated(id) => {
+                    context.credential_id = Some(id);
                     // A long batch of header events can cross the deadline
                     // after the shard began polling it.
                     if context
@@ -255,6 +258,9 @@ impl Shard {
         context: &RequestContext<'_>,
         pending: &mut PendingConnectSetups,
     ) {
+        if let Some(id) = context.credential_id {
+            pending.credentials.insert(stream_id, id);
+        }
         match request {
             ConnectRequest::Tcp { authority } => match uri::parse_connect_authority(authority) {
                 Ok(target) => {

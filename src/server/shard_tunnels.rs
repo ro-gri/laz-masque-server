@@ -13,6 +13,7 @@ impl Shard {
             return;
         }
         let PendingConnectSetups {
+            credentials,
             tcp: pending_tcp_setups,
             udp: pending_udp_setups,
             ip: pending_ip_setups,
@@ -31,6 +32,16 @@ impl Shard {
             if !client.pending_tcp_tunnels.contains_key(&stream_id) {
                 continue;
             }
+            let usage = self
+                .shared
+                .accounting
+                .acquire(credentials.get(&stream_id).copied());
+            client
+                .pending_tcp_tunnels
+                .get_mut(&stream_id)
+                .unwrap()
+                .usage = usage;
+
             if client.tunnel_count() > max_tunnels {
                 warn!(
                     stream_id,
@@ -75,6 +86,16 @@ impl Shard {
             if !client.pending_udp_tunnels.contains_key(&stream_id) {
                 continue;
             }
+            let usage = self
+                .shared
+                .accounting
+                .acquire(credentials.get(&stream_id).copied());
+            client
+                .pending_udp_tunnels
+                .get_mut(&stream_id)
+                .unwrap()
+                .usage = usage;
+
             if client.tunnel_count() > max_tunnels {
                 warn!(
                     stream_id,
@@ -113,6 +134,10 @@ impl Shard {
         // Handle pending CONNECT-IP tunnel setups: allocate addresses,
         // register routes, send capsules.
         for stream_id in pending_ip_setups {
+            let usage = self
+                .shared
+                .accounting
+                .acquire(credentials.get(&stream_id).copied());
             if client.tunnel_count() >= max_tunnels {
                 warn!(
                     stream_id,
@@ -136,6 +161,7 @@ impl Shard {
                 stream_id,
                 conn_idx,
                 self.config.ip_proxy.tun_mtu,
+                usage,
             );
         }
     }
@@ -147,6 +173,7 @@ impl Shard {
         stream_id: u64,
         conn_idx: u64,
         max_payload: usize,
+        usage: crate::accounting::Usage,
     ) {
         let mut tunnel = IpTunnel::new(stream_id);
 
@@ -234,7 +261,7 @@ impl Shard {
                 client
                     .pending_ip_responses
                     .entry(stream_id)
-                    .or_insert_with(Instant::now);
+                    .or_insert_with(|| (Instant::now(), usage));
                 return;
             }
             warn!(stream_id, %e, "failed to send CONNECT-IP 200");
@@ -267,6 +294,8 @@ impl Shard {
         client
             .capsule_streams
             .insert(stream_id, capsules::CapsuleStream::new_ip(max_payload));
+        tunnel.online = usage.activate();
+        tunnel.usage = usage;
         client.ip_tunnels.insert(stream_id, tunnel);
         // DATA/FIN may already have been polled while authentication or the
         // response headers were pending. Resume from QUIC's bounded storage.
@@ -295,7 +324,7 @@ impl Shard {
             };
             let streams: Vec<u64> = client.pending_ip_responses.keys().copied().collect();
             for stream_id in streams {
-                let started = client
+                let (started, usage) = client
                     .pending_ip_responses
                     .remove(&stream_id)
                     .expect("pending response exists");
@@ -305,9 +334,10 @@ impl Shard {
                     stream_id,
                     *index,
                     self.config.ip_proxy.tun_mtu,
+                    usage,
                 );
                 if let Some(blocked_at) = client.pending_ip_responses.get_mut(&stream_id) {
-                    *blocked_at = started;
+                    blocked_at.0 = started;
                 }
             }
         }
@@ -479,6 +509,7 @@ impl Shard {
 
         let header = pending.header();
         let early_datagrams = pending.take_early_datagrams();
+        let usage = std::mem::take(&mut pending.usage);
         drop(pending);
         let (send_socket, socket, target_addr, target_udp_gso, association) = prepared.into_http3();
         let recv_association = association.clone();
@@ -585,7 +616,7 @@ impl Shard {
                 }
             }
         });
-        let tunnel = UdpTunnel::from_socket(
+        let mut tunnel = UdpTunnel::from_socket(
             stream_id,
             target_addr,
             send_socket,
@@ -600,6 +631,8 @@ impl Shard {
             udp_gso = target_udp_gso,
             "UDP tunnel established"
         );
+        tunnel.online = usage.activate();
+        tunnel.usage = usage;
         client.udp_tunnels.insert(stream_id, tunnel);
         client.capsule_streams.insert(
             stream_id,
@@ -735,6 +768,7 @@ impl Shard {
 
                         let early_data = std::mem::take(&mut pending.early_data);
                         let client_finished = pending.client_finished;
+                        let usage = std::mem::take(&mut pending.usage);
                         drop(pending);
 
                         let mut tunnel = TcpTunnel::from_stream(
@@ -745,6 +779,8 @@ impl Shard {
                             self.tcp_event_tx.clone(),
                             Arc::clone(&self.shared.tcp_read_retention),
                         );
+                        tunnel.online = usage.activate();
+                        tunnel.usage = usage;
                         for data in early_data {
                             if !tunnel.queue_client_data(data) {
                                 warn!(stream_id, "failed to transfer early CONNECT body");

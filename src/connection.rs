@@ -213,7 +213,7 @@ pub struct ClientConnection {
     pub ip_tunnels: FxHashMap<u64, IpTunnel>,
     /// CONNECT-IP response attempts waiting for stream capacity. Addresses
     /// are not reserved while blocked, so dropping this state leaks no lease.
-    pub(crate) pending_ip_responses: FxHashMap<u64, std::time::Instant>,
+    pub(crate) pending_ip_responses: FxHashMap<u64, (std::time::Instant, crate::accounting::Usage)>,
     /// Streams whose CONNECT is waiting on credential verification.
     ///
     /// Request-body bytes for these streams are deliberately left unread in

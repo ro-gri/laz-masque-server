@@ -33,6 +33,7 @@ pub(crate) struct BasicAuthenticator {
 /// One selected credential. A request keeps this snapshot while Argon2 runs,
 /// so a concurrent SIGHUP cannot pair its password with a different hash.
 pub(crate) struct BasicCredential {
+    pub(crate) id: uuid::Uuid,
     password_hash: String,
     cache_key: ring::hmac::Key,
     verification: Mutex<VerificationState>,
@@ -159,8 +160,13 @@ impl BasicAuthenticator {
         Self::from_section(auth)
     }
 
+    #[cfg(test)]
     pub(crate) fn new(username: &str, password_hash: &str) -> anyhow::Result<Self> {
-        Self::from_entries(std::iter::once((username, password_hash)))
+        Self::from_entries(std::iter::once((
+            uuid::Uuid::nil(),
+            username,
+            password_hash,
+        )))
     }
 
     /// Build the effective credential set from either the legacy scalar pair
@@ -177,18 +183,22 @@ impl BasicAuthenticator {
             return Self::from_entries(
                 auth.users
                     .iter()
-                    .map(|user| (user.username.as_str(), user.password_hash.as_str())),
+                    .map(|user| (user.id, user.username.as_str(), user.password_hash.as_str())),
             );
         }
 
-        Self::new(&auth.username, &auth.password_hash)
+        Self::from_entries(std::iter::once((
+            auth.id,
+            auth.username.as_str(),
+            auth.password_hash.as_str(),
+        )))
     }
 
     fn from_entries<'a>(
-        entries: impl IntoIterator<Item = (&'a str, &'a str)>,
+        entries: impl IntoIterator<Item = (uuid::Uuid, &'a str, &'a str)>,
     ) -> anyhow::Result<Self> {
         let mut users = HashMap::new();
-        for (index, (username, password_hash)) in entries.into_iter().enumerate() {
+        for (index, (id, username, password_hash)) in entries.into_iter().enumerate() {
             if index >= MAX_BASIC_USERS_PER_LISTENER {
                 bail!(
                     "a Basic listener may configure at most {MAX_BASIC_USERS_PER_LISTENER} users"
@@ -208,6 +218,7 @@ impl BasicAuthenticator {
             )
             .map_err(|_| anyhow::anyhow!("failed to generate authentication cache key"))?;
             let credential = Arc::new(BasicCredential {
+                id,
                 password_hash: password_hash.to_owned(),
                 cache_key,
                 verification: Mutex::new(VerificationState::default()),
@@ -237,7 +248,7 @@ impl BasicAuthenticator {
     #[cfg(test)]
     pub(crate) fn authenticate(&self, value: Option<&[u8]>) -> bool {
         match self.precheck(value) {
-            AuthPrecheck::Authenticated => true,
+            AuthPrecheck::Authenticated(_) => true,
             AuthPrecheck::Rejected => false,
             AuthPrecheck::NeedsVerify {
                 credential,
@@ -296,7 +307,7 @@ impl BasicAuthenticator {
         };
 
         if credential.cached(password) {
-            return AuthPrecheck::Authenticated;
+            return AuthPrecheck::Authenticated(credential.id);
         }
 
         AuthPrecheck::NeedsVerify {
@@ -399,8 +410,8 @@ impl VerificationCredential {
     }
 }
 fn http_precheck(attempt: crate::auth_http::Attempt) -> AuthPrecheck {
-    if attempt.cached().is_some() {
-        AuthPrecheck::Authenticated
+    if let Some(id) = attempt.cached() {
+        AuthPrecheck::Authenticated(id)
     } else {
         AuthPrecheck::NeedsVerify {
             credential: VerificationCredential::Http(attempt),
@@ -452,7 +463,7 @@ impl SharedBasicAuthenticator {
 /// Result of the cheap half of authentication.
 pub(crate) enum AuthPrecheck {
     /// The current credential snapshot has recently verified this password.
-    Authenticated,
+    Authenticated(uuid::Uuid),
     /// Rejected without hashing.
     Rejected,
     /// Well formed and the username matches; the password still needs the
@@ -521,7 +532,7 @@ mod tests {
 
     fn authenticate_shared(auth: &SharedBasicAuthenticator, value: &[u8]) -> bool {
         match auth.precheck(Some(value)) {
-            AuthPrecheck::Authenticated => true,
+            AuthPrecheck::Authenticated(_) => true,
             AuthPrecheck::Rejected => false,
             AuthPrecheck::NeedsVerify {
                 credential,
@@ -543,7 +554,7 @@ mod tests {
         assert!(auth.authenticate(Some(&good)));
         assert!(matches!(
             auth.precheck(Some(&good)),
-            AuthPrecheck::Authenticated
+            AuthPrecheck::Authenticated(_)
         ));
         assert!(matches!(auth.precheck(None), AuthPrecheck::Rejected));
         assert!(matches!(
@@ -580,7 +591,7 @@ mod tests {
         assert!(authenticate_shared(&shared, &good));
         assert!(matches!(
             shared.precheck(Some(&good)),
-            AuthPrecheck::Authenticated
+            AuthPrecheck::Authenticated(_)
         ));
         shared.replace(BasicAuthenticator::new(USERNAME, password_hash()).unwrap());
         assert!(matches!(

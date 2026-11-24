@@ -20,11 +20,37 @@ fn routed_config(files: &TestFiles, proxy: std::net::SocketAddr) -> ServerConfig
 async fn socks5_tcp_and_udp_http2_use_checked_ips() {
     let files = TestFiles::new();
     let proxy = mock::MockSocks::start().await;
-    let (addr, server) = spawn_http2_config(routed_config(&files, proxy.addr)).await;
+    let mut config = routed_config(&files, proxy.addr);
+    let id = uuid::Uuid::new_v4();
+    config.listeners[0].auth = masque::config::AuthSection {
+        id,
+        username: "alice".into(),
+        password_hash: masque::auth::hash_password(b"secret").unwrap(),
+        ..Default::default()
+    };
+    config.accounting.listen_addr = Some("127.0.0.1:0".parse().unwrap());
+    let mut bound = Server::bind(config).await.unwrap();
+    let addr = bound.listen_addrs()[0];
+    let stats = bound.accounting_addr().unwrap();
+    let server = tokio::spawn(async move {
+        bound.run().await.unwrap();
+    });
+    let authorize = |mut request: http::Request<()>| {
+        request.headers_mut().insert(
+            "proxy-authorization",
+            format!("Basic {}", STANDARD.encode("alice:secret"))
+                .parse()
+                .unwrap(),
+        );
+        request
+    };
     let (mut client, driver) = connect_h2(addr).await;
     for destination in ["203.0.113.1:443", "[2001:db9::1]:443"] {
         let (response, mut send) = client
-            .send_request(connect_request(destination.parse().unwrap()), false)
+            .send_request(
+                authorize(connect_request(destination.parse().unwrap())),
+                false,
+            )
             .unwrap();
         let response = response.await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -44,7 +70,7 @@ async fn socks5_tcp_and_udp_http2_use_checked_ips() {
         assert_eq!(data, b"SOCKS5 TCP");
     }
     let request = super::udp_capsules::udp_request("203.0.113.1:53".parse().unwrap());
-    let (response, mut send) = client.send_request(request, false).unwrap();
+    let (response, mut send) = client.send_request(authorize(request), false).unwrap();
     let response = response.await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let mut body = response.into_body();
@@ -76,6 +102,10 @@ async fn socks5_tcp_and_udp_http2_use_checked_ips() {
         .await
         .unwrap();
     assert!(closed.is_none() || closed.unwrap().is_err());
+    let value = accounting::wait(stats, |v| {
+        v["traffic"][0]["rx_bytes"] == 1284 && v["traffic"][0]["tx_bytes"] == 1284
+    });
+    assert_eq!(value["traffic"][0]["id"], id.to_string());
     server.abort();
     driver.abort();
 }

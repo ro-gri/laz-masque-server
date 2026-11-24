@@ -69,6 +69,7 @@ pub(super) async fn serve(
         .body(())?;
     let mut send = respond.send_response(response, false)?;
     info!(stream_id, %target_addr, transport = "http2", "UDP tunnel established");
+    let _online = context.usage.activate();
     let _metrics = TunnelMetricsGuard::new(Arc::clone(&context.metrics), 1);
     let activity = Arc::new(Activity::new());
     // QUIC varints may encode Context ID zero in 1, 2, 4, or 8 bytes. Keep
@@ -93,6 +94,7 @@ pub(super) async fn serve(
                 if udp_payload.len() > max_payload {
                     anyhow::bail!("UDP payload exceeds configured HTTP/2 datagram limit");
                 }
+                context.usage.rx(udp_payload.len());
                 let written = socket.send(udp_payload, &mut packet).await?;
                 if written != udp_payload.len() {
                     anyhow::bail!("target UDP socket accepted a partial datagram");
@@ -118,6 +120,7 @@ pub(super) async fn serve(
             // is applied before reading another batch.
             for index in 0..RESPONSE_BATCH_PACKETS {
                 if read <= max_payload {
+                    context.usage.tx(read);
                     if capsules.is_empty() {
                         capsules.reserve(read + 8);
                     }

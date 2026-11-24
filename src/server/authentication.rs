@@ -19,12 +19,14 @@ pub(super) struct AuthOutcome {
     connection_index: u64,
     stream_id: u64,
     request: ConnectRequest,
-    authorized: bool,
+    authorized: Option<uuid::Uuid>,
 }
 
 /// One bounded cold request, shared by H2 and H3. Followers hold admission
 /// slots but never a CPU permit or blocking thread. Once work starts, its
 /// admission guards live until Argon2 actually finishes, even after a reset.
+/// Outer None means cancellation; Some(None) is denial; Some(Some(id)) preserves
+/// the verified credential identity for tunnel accounting.
 pub(super) async fn verify_basic_password(
     credential: impl Into<VerificationCredential>,
     password: zeroize::Zeroizing<Vec<u8>>,
@@ -32,7 +34,7 @@ pub(super) async fn verify_basic_password(
     metrics: Arc<ShardMetrics>,
     held: impl Send + 'static,
     cancelled: Arc<AtomicBool>,
-) -> Option<bool> {
+) -> Option<Option<uuid::Uuid>> {
     struct CancelOnDrop(Arc<AtomicBool>);
     impl Drop for CancelOnDrop {
         fn drop(&mut self) {
@@ -48,14 +50,15 @@ pub(super) async fn verify_basic_password(
             if cancelled.load(Ordering::Acquire) {
                 return None;
             }
-            let authorized = attempt.verify().await.is_some();
+            let authorized = attempt.verify().await;
             if cancelled.load(Ordering::Acquire) {
                 return None;
             }
-            record_result(&metrics, authorized);
+            record_result(&metrics, authorized.is_some());
             return Some(authorized);
         }
     };
+    let id = credential.id;
     loop {
         if cancelled.load(Ordering::Acquire) {
             return None;
@@ -81,21 +84,21 @@ pub(super) async fn verify_basic_password(
                     metrics.record_auth_argon2();
                     let authorized = leader.verify(&password);
                     record_result(&metrics, authorized);
-                    Some(authorized)
+                    Some(authorized.then_some(id))
                 })
                 .await
                 {
                     Ok(result) => result,
                     Err(_) => {
                         failure_metrics.record_auth_failure();
-                        Some(false)
+                        Some(None)
                     }
                 };
             }
         };
         if let Some(authorized) = result {
             record_result(&metrics, authorized);
-            return Some(authorized);
+            return Some(authorized.then_some(id));
         }
         // A cancelled leader never leaves its followers waiting forever.
     }
@@ -266,7 +269,7 @@ impl Shard {
             let client_finished = awaiting.client_finished;
             let early_udp_datagrams = awaiting.take_early_udp_datagrams();
 
-            if !authorized {
+            if authorized.is_none() {
                 warn!(stream_id, "proxy authentication failed");
                 Self::send_auth_rejection(
                     h3,
@@ -284,6 +287,7 @@ impl Shard {
             // and observes the FIN retained by QUIC. A reset, unlike FIN,
             // removes awaiting_auth above and never reaches this point.
             let request_context = RequestContext {
+                credential_id: authorized,
                 peer_key: client.external_certificate_key.as_deref(),
                 metrics: &self.metrics,
                 config: &self.config,
@@ -420,7 +424,7 @@ mod tests {
         assert_eq!(counter(&registry, "masque_auth_argon2_total"), 0);
         permits.add_permits(1);
         for task in tasks {
-            assert_eq!(task.await.unwrap(), Some(true));
+            assert_eq!(task.await.unwrap(), Some(Some(uuid::Uuid::nil())));
         }
         assert_eq!(counter(&registry, "masque_auth_argon2_total"), 1);
         assert_eq!(counter(&registry, "masque_auth_pending"), 0);
@@ -464,7 +468,7 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap(),
-            Some(true)
+            Some(Some(uuid::Uuid::nil()))
         );
         assert_eq!(counter(&registry, "masque_auth_argon2_total"), 1);
     }

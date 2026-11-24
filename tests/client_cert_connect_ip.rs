@@ -3,6 +3,9 @@
 //! The fixtures use self-signed certificates with enrolled public keys. They
 //! exercise standard and legacy CONNECT-IP request framing and address leases.
 
+#[path = "support/accounting.rs"]
+mod accounting;
+
 use std::io::{Read as _, Write as _};
 use std::net::TcpStream;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
@@ -211,6 +214,18 @@ fn spawn_server(config: ServerConfig) -> Vec<SocketAddr> {
 }
 
 fn spawn_server_with_observability(config: ServerConfig) -> (Vec<SocketAddr>, Option<SocketAddr>) {
+    let (addresses, observability, _) = spawn_server_endpoints(config);
+    (addresses, observability)
+}
+
+fn spawn_server_with_accounting(config: ServerConfig) -> (Vec<SocketAddr>, SocketAddr) {
+    let (addresses, _, accounting) = spawn_server_endpoints(config);
+    (addresses, accounting.unwrap())
+}
+
+fn spawn_server_endpoints(
+    config: ServerConfig,
+) -> (Vec<SocketAddr>, Option<SocketAddr>, Option<SocketAddr>) {
     let (bound_tx, bound_rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut builder = if config.listeners.iter().any(|listener| listener.shards > 1) {
@@ -226,7 +241,11 @@ fn spawn_server_with_observability(config: ServerConfig) -> (Vec<SocketAddr>, Op
                 Ok(mut server) => {
                     // A failed send means the test gave up; run anyway and let
                     // the detached thread die with the process.
-                    let _ = bound_tx.send((server.listen_addrs(), server.observability_addr()));
+                    let _ = bound_tx.send((
+                        server.listen_addrs(),
+                        server.observability_addr(),
+                        server.accounting_addr(),
+                    ));
                     let _ = server.run().await;
                 }
                 Err(e) => panic!("server failed to bind: {e:#}"),
@@ -2109,7 +2128,10 @@ fn http3_udp_capsules_handle_early_fragmented_data_and_small_response_windows() 
     config.ip_proxy.enabled = false;
     config.udp_proxy.allow_targets = vec!["127.0.0.0/8".into()];
     config.udp_proxy.deny_targets.clear();
-    let peer = spawn_server(config)[0];
+    let id = config.listeners[0].auth.id;
+    config.accounting.listen_addr = Some(ephemeral_addr());
+    let (peers, stats) = spawn_server_with_accounting(config);
+    let peer = peers[0];
     // No QUIC DATAGRAM capability, and only 64 bytes of initial response
     // credit: every 4 KiB response must survive partial HTTP/3 DATA writes.
     let mut client = Client::connect_with_transport(
@@ -2201,6 +2223,16 @@ fn http3_udp_capsules_handle_early_fragmented_data_and_small_response_windows() 
         assert!(client.quic.peer_error().is_none());
     }
     echo.join().unwrap();
+    let value = accounting::wait(stats, |value| {
+        value["traffic"][0]["rx_bytes"] == 3 * 4096 && value["traffic"][0]["tx_bytes"] == 3 * 4096
+    });
+    assert_eq!(value["traffic"][0]["id"], id.to_string());
+    assert_eq!(value["online"], serde_json::json!([id]));
+    client.quic.close(true, 0, b"done").unwrap();
+    client.flush().unwrap();
+    let after = accounting::wait(stats, |value| value["online"] == serde_json::json!([]));
+    assert_eq!(after["traffic"], value["traffic"]);
+    assert_eq!(after["instance_id"], value["instance_id"]);
 }
 
 #[test]
@@ -3547,6 +3579,7 @@ fn http_authorization_h3_basic_and_certificate_gate_connect_ip() {
         let (client_cert, client_key_path) = write_pem(dir.path(), "client", &client_key, &leaf);
         let permitted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let permission = permitted.clone();
+        let id = uuid::Uuid::new_v4();
         let expected_key = STANDARD.encode(client_key.public_key_to_der().unwrap());
         let authorizer = auth_server::AuthorizationServer::start(move |request| {
             if certificate {
@@ -3558,7 +3591,7 @@ fn http_authorization_h3_basic_and_certificate_gate_connect_ip() {
                 assert_eq!(request["password"], "secret");
             }
             auth_server::Reply::json(
-                serde_json::json!({"ok":permission.load(std::sync::atomic::Ordering::Relaxed),"id":uuid::Uuid::new_v4()}),
+                serde_json::json!({"ok":permission.load(std::sync::atomic::Ordering::Relaxed),"id":id}),
             )
         });
         let mut config = server_config(cert, key, ephemeral_addr(), Vec::new());
@@ -3578,7 +3611,9 @@ fn http_authorization_h3_basic_and_certificate_gate_connect_ip() {
                 ..Default::default()
             }),
         };
-        let peer = spawn_server(config)[0];
+        config.accounting.listen_addr = Some(ephemeral_addr());
+        let (peers, stats) = spawn_server_with_accounting(config);
+        let peer = peers[0];
         if certificate {
             let (_, stranger, stranger_key) = auth_server::certificate_pair();
             let (stranger_cert, stranger_key_path) =
@@ -3625,6 +3660,14 @@ fn http_authorization_h3_basic_and_certificate_gate_connect_ip() {
             );
             assert_eq!(client.capsules(stream, 2, Duration::from_secs(5)).len(), 2);
         }
+        let value = accounting::wait(stats, |value| value["online"] == serde_json::json!([id]));
+        assert_eq!(
+            value["traffic"],
+            serde_json::json!([{ "id": id, "rx_bytes": 0, "tx_bytes": 0 }])
+        );
+        client.quic.close(true, 0, b"done").unwrap();
+        client.flush().unwrap();
+        accounting::wait(stats, |value| value["online"] == serde_json::json!([]));
         assert_eq!(authorizer.count(), 2);
         assert_eq!(
             authorizer
@@ -3633,4 +3676,56 @@ fn http_authorization_h3_basic_and_certificate_gate_connect_ip() {
             1
         );
     }
+}
+
+#[test]
+fn file_certificate_accounting_uses_roster_uuid_without_counting_control_capsules() {
+    let dir = TempDir::new("file-certificate-accounting");
+    let key = p256_key();
+    let (cert, key_path) = write_pem(
+        dir.path(),
+        "server",
+        &key,
+        &self_signed(&key, Some("localhost")),
+    );
+    let client_key = p256_key();
+    let (client_cert, client_key_path) = write_pem(
+        dir.path(),
+        "client",
+        &client_key,
+        &self_signed(&client_key, None),
+    );
+    let id = uuid::Uuid::new_v4();
+    let mut config = server_config(
+        cert,
+        key_path,
+        ephemeral_addr(),
+        vec![ClientEntry {
+            id,
+            name: "test".into(),
+            public_key: public_key_b64(&client_key),
+            ..Default::default()
+        }],
+    );
+    config.accounting.listen_addr = Some(ephemeral_addr());
+    let (peers, stats) = spawn_server_with_accounting(config);
+    let mut client = Client::connect(peers[0], &client_cert, &client_key_path).unwrap();
+    client.handshake(Duration::from_secs(5)).unwrap();
+    client.init_h3().unwrap();
+    let stream = client.send_connect_ip("connect-ip").unwrap();
+    assert_eq!(
+        client
+            .response_status(stream, Duration::from_secs(5))
+            .unwrap(),
+        200
+    );
+    assert_eq!(client.capsules(stream, 2, Duration::from_secs(5)).len(), 2);
+    let value = accounting::wait(stats, |v| v["online"] == serde_json::json!([id]));
+    assert_eq!(
+        value["traffic"],
+        serde_json::json!([{ "id":id, "rx_bytes":0, "tx_bytes":0 }])
+    );
+    client.quic.close(true, 0, b"done").unwrap();
+    client.flush().unwrap();
+    accounting::wait(stats, |v| v["online"] == serde_json::json!([]));
 }

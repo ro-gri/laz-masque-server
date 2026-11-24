@@ -20,6 +20,11 @@ pre-1.0.
 
 ### Added
 
+- Add optional loopback `GET /stats` accounting with a startup instance UUID,
+  cumulative payload RX/TX and online credential UUIDs across H2/H3 and all
+  tunnel types. Retain counters across reload, cache expiry and disconnect
+  without eviction; keep accounting independent of Prometheus.
+
 - Add optional local HTTP authorization for Basic and CA-verified client
   certificates, with pooled keep-alive connections, bounded success caching
   and coalesced checks. Use one root authorization source and shared pool/cache

@@ -11,6 +11,8 @@ use std::path::PathBuf;
 #[serde(deny_unknown_fields)]
 pub struct ServerConfig {
     #[serde(default)]
+    pub accounting: AccountingSection,
+    #[serde(default)]
     pub authorization: AuthorizationSection,
     #[serde(default)]
     pub server: ServerSection,
@@ -531,6 +533,7 @@ pub struct ObservabilitySection {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
+            accounting: AccountingSection::default(),
             authorization: AuthorizationSection::default(),
             server: ServerSection::default(),
             outbound: OutboundSection::default(),
@@ -734,6 +737,13 @@ pub fn parse_toml(toml_str: &str) -> Result<ServerConfig, toml::de::Error> {
         }
     }
     Ok(config)
+}
+
+/// Optional per-credential statistics, independent of Prometheus.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct AccountingSection {
+    pub listen_addr: Option<SocketAddr>,
 }
 
 #[cfg(test)]

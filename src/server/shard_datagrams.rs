@@ -188,6 +188,7 @@ impl Shard {
                         {
                             debug!(%e, "TUN batch write failed");
                         }
+                        tunnel.usage.rx(dgram.payload.len());
                         tun_send.push(dgram.payload);
                     }
                     continue;
@@ -258,9 +259,13 @@ impl Shard {
                     }
                 };
                 tunnel.last_activity = Instant::now();
+                let usage = tunnel.usage.clone();
 
                 let datagram_count = datagrams.len();
                 for (index, datagram) in datagrams.into_iter().enumerate() {
+                    if let Ok(decoded) = datagram::decode_ref(&datagram) {
+                        usage.tx(decoded.payload.len());
+                    }
                     if !client.native_datagrams() {
                         if let Ok(decoded) = datagram::decode_ref(&datagram)
                             && !client.queue_datagram_capsule(batch.stream_id, decoded.payload)
@@ -376,7 +381,10 @@ impl Shard {
             if let Some(tunnel) = client.ip_tunnels.get_mut(&owner.stream_id) {
                 tunnel.last_activity = Instant::now();
                 self.dirty.mark(owner.conn_id);
-                if !client.queue_datagram_capsule(owner.stream_id, pkt) {
+                let usage = tunnel.usage.clone();
+                if client.queue_datagram_capsule(owner.stream_id, pkt) {
+                    usage.tx(pkt.len());
+                } else {
                     self.metrics.record_datagram_queue_drop(1);
                 }
             }
@@ -396,7 +404,7 @@ impl Shard {
             self.dirty.mark(owner.conn_id);
 
             match client.quic.dgram_send_buf(tunnel.header.encode(pkt)) {
-                Ok(()) => {}
+                Ok(()) => tunnel.usage.tx(pkt.len()),
                 Err(quiche::Error::Done) => {
                     self.metrics.record_datagram_queue_drop(1);
                     return false;

@@ -147,6 +147,7 @@ enum TcpCommand {
 }
 
 pub struct PendingTcpTunnel {
+    pub(crate) usage: crate::accounting::Usage,
     pub stream_id: u64,
     pub last_activity: Instant,
     pub early_data: Vec<Vec<u8>>,
@@ -161,6 +162,7 @@ pub struct PendingTcpTunnel {
 impl PendingTcpTunnel {
     pub fn staging(stream_id: u64) -> Self {
         Self {
+            usage: Default::default(),
             stream_id,
             last_activity: Instant::now(),
             early_data: Vec::new(),
@@ -218,6 +220,8 @@ pub struct PendingTcpResponse {
 }
 
 pub struct TcpTunnel {
+    pub(crate) online: crate::accounting::Online,
+    pub(crate) usage: crate::accounting::Usage,
     pub stream_id: u64,
     pub target_addr: SocketAddr,
     pub last_activity: Instant,
@@ -412,6 +416,8 @@ impl TcpTunnel {
         });
 
         Self {
+            online: Default::default(),
+            usage: Default::default(),
             stream_id,
             target_addr,
             last_activity: Instant::now(),
@@ -456,6 +462,7 @@ impl TcpTunnel {
             self.queued_client_bytes.fetch_sub(len, Ordering::AcqRel);
             return false;
         }
+        self.usage.rx(len);
         self.last_activity = Instant::now();
         true
     }
@@ -477,6 +484,7 @@ impl TcpTunnel {
         if self.response_finished {
             return false;
         }
+        self.usage.tx(data.len());
         self.pending_responses.push_back(PendingTcpResponse {
             data,
             offset: 0,

@@ -160,6 +160,7 @@ impl Http2Listener {
                     };
 
                     let context = ConnectionContext {
+                        usage: Default::default(),
                         peer_key: None,
                         resolver: self.shared.resolver.connection(),
                         acceptor: Arc::clone(&self.acceptor),
@@ -202,6 +203,7 @@ impl Http2Listener {
 
 #[derive(Clone)]
 struct ConnectionContext {
+    usage: crate::accounting::Usage,
     peer_key: Option<Arc<Vec<u8>>>,
     resolver: TargetResolver,
     acceptor: Arc<SslAcceptor>,
